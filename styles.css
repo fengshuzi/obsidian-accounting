@@ -1,0 +1,1120 @@
+/* Notion 风格记账管理插件样式 */
+
+.accounting-view {
+    padding: 24px;
+    height: 100%;
+    overflow-y: auto;
+    background: var(--background-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+}
+
+/* 头部样式 - Notion 风格 */
+.accounting-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.accounting-title {
+    margin: 0;
+    color: var(--text-normal);
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.accounting-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.accounting-btn {
+    padding: 8px 16px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.accounting-btn:hover {
+    background: var(--background-modifier-hover);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+/* 筛选器样式 - Notion 卡片风格 */
+.accounting-filters {
+    margin-bottom: 24px;
+    padding: 20px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.filter-section {
+    margin-bottom: 16px;
+}
+
+.filter-section:last-child {
+    margin-bottom: 0;
+}
+
+.filter-label {
+    display: block;
+    margin-bottom: 12px;
+    font-weight: 600;
+    color: var(--text-normal);
+    font-size: 14px;
+}
+
+.quick-time-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.quick-time-btn {
+    padding: 8px 16px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-normal);
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.quick-time-btn:hover {
+    background: var(--background-modifier-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.quick-time-btn.active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+.current-time-display {
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+    color: var(--text-normal);
+    border: 1px solid #bae6fd;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 12px;
+}
+
+.clear-filter-btn {
+    padding: 8px 16px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.clear-filter-btn:hover {
+    background: var(--background-modifier-hover);
+    transform: translateY(-1px);
+}
+
+/* 统计卡片样式 - Notion 风格 */
+.accounting-stats {
+    margin-bottom: 32px;
+}
+
+.stats-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: all 0.15s ease;
+    min-width: 0; /* 防止内容溢出 */
+}
+
+.stat-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+}
+
+.stat-card.income {
+    background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+    border-color: #bbf7d0;
+}
+
+.stat-card.expense {
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    border-color: #fcd34d;
+}
+
+.stat-card.balance.positive {
+    background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+    border-color: #86efac;
+}
+
+.stat-card.balance.negative {
+    background: linear-gradient(135deg, #fef2f2, #fecaca);
+    border-color: #fca5a5;
+}
+
+.stat-card.budget {
+    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    border-color: #93c5fd;
+}
+
+.stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-normal);
+    line-height: 1.2;
+    word-break: break-all; /* 防止长数字换行 */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.stat-progress {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+/* 预算告警样式 - Notion 风格 */
+.budget-alerts {
+    margin-bottom: 24px;
+}
+
+.budget-alert {
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    font-weight: 500;
+    font-size: 14px;
+    border-left: 4px solid;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.budget-alert.warning {
+    background: linear-gradient(135deg, #fffbeb, #fef3c7);
+    color: #92400e;
+    border-left-color: #f59e0b;
+}
+
+.budget-alert.exceeded {
+    background: linear-gradient(135deg, #fef2f2, #fecaca);
+    color: #991b1b;
+    border-left-color: #ef4444;
+}
+
+/* 分类统计样式 - Bootstrap 风格标签 */
+.category-stats h3 {
+    margin-bottom: 16px;
+    color: var(--text-normal);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.category-list {
+    display: grid;
+    gap: 8px;
+}
+
+.category-item {
+    padding: 12px 16px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.category-item:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+.category-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    gap: 12px;
+}
+
+/* Bootstrap 风格的分类标签 */
+.category-label {
+    display: inline-block;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.category-amount-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.category-amount {
+    font-weight: 700;
+    color: var(--text-accent);
+    font-size: 15px;
+    white-space: nowrap;
+}
+
+.category-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--background-secondary);
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+/* 预算进度条样式 - Notion 风格 */
+.budget-progress {
+    width: 100%;
+    height: 8px;
+    background: var(--background-modifier-border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0;
+}
+
+.budget-progress-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+    border-radius: 4px;
+}
+
+.budget-progress-fill.normal {
+    background: linear-gradient(90deg, #10b981, #059669);
+}
+
+.budget-progress-fill.warning {
+    background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.budget-progress-fill.exceeded {
+    background: linear-gradient(90deg, #ef4444, #dc2626);
+}
+
+.budget-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    font-weight: 500;
+}
+
+/* 记录列表样式 - Notion 风格 */
+.accounting-records {
+    margin-top: 24px;
+}
+
+.records-list h3 {
+    margin-bottom: 20px;
+    color: var(--text-normal);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.day-group {
+    margin-bottom: 24px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    background: var(--background-primary);
+}
+
+.day-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.day-date {
+    font-weight: 600;
+    color: var(--text-normal);
+    font-size: 15px;
+}
+
+.day-total {
+    font-weight: 700;
+    font-size: 16px;
+}
+
+.day-total.positive {
+    color: #059669;
+}
+
+.day-total.negative {
+    color: #dc2626;
+}
+
+.day-records {
+    background: var(--background-primary);
+}
+
+.record-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--background-modifier-border-focus);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    position: relative;
+}
+
+.record-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.record-item:last-child {
+    border-bottom: none;
+}
+
+/* 补录标记 */
+.record-item.backfill::before {
+    content: "补录";
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 10px;
+    color: var(--text-muted);
+    background: var(--background-modifier-border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.record-info {
+    flex: 1;
+}
+
+/* 记录中的分类标签 */
+.record-category-label {
+    display: inline-block;
+    padding: 3px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 4px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.record-category {
+    font-weight: 600;
+    color: var(--text-accent);
+    margin-bottom: 4px;
+    font-size: 14px;
+}
+
+.record-description {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.record-amount {
+    text-align: right;
+}
+
+.amount {
+    font-weight: 700;
+    font-size: 16px;
+}
+
+.amount.income {
+    color: #059669;
+}
+
+.amount.expense {
+    color: #dc2626;
+}
+
+/* 空状态样式 - Notion 风格 */
+.no-data, .no-records {
+    text-align: center;
+    padding: 48px;
+    color: var(--text-muted);
+    font-size: 15px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .accounting-view {
+        padding: 16px;
+    }
+    
+    .accounting-title {
+        font-size: 24px;
+    }
+    
+    .accounting-header {
+        flex-direction: column;
+        gap: 16px;
+        align-items: flex-start;
+    }
+    
+    .stats-overview {
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+    
+    .stat-card {
+        padding: 16px;
+    }
+    
+    .stat-value {
+        font-size: 20px;
+    }
+    
+    .category-info {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    
+    .category-amount,
+    .category-count {
+        align-self: flex-end;
+    }
+    
+    .record-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .record-amount {
+        align-self: flex-end;
+    }
+    
+    .category-config-modal {
+        min-width: 90vw;
+        max-width: 90vw;
+        padding: 20px;
+    }
+    
+    .category-item {
+        grid-template-columns: 80px 1fr 60px;
+        gap: 8px;
+        padding: 10px 12px;
+    }
+    
+    .category-keyword,
+    .category-name {
+        font-size: 12px;
+        padding: 5px 8px;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-overview {
+        grid-template-columns: 1fr;
+    }
+    
+    .quick-time-buttons {
+        flex-direction: column;
+        gap: 6px;
+    }
+    
+    .quick-time-btn {
+        width: 100%;
+        text-align: center;
+    }
+}
+
+/* 筛选器样式 */
+.accounting-filters {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+}
+
+.filter-section {
+    margin-bottom: 15px;
+}
+
+.filter-section:last-child {
+    margin-bottom: 0;
+}
+
+.filter-label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: 500;
+    color: var(--text-normal);
+}
+
+.quick-time-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.quick-time-btn {
+    padding: 6px 12px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-normal);
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.quick-time-btn:hover {
+    background: var(--background-modifier-hover);
+}
+
+.quick-time-btn.active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+.current-time-display {
+    padding: 8px 12px;
+    background: var(--background-modifier-success);
+    color: var(--text-on-accent);
+    border-radius: 4px;
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+
+.clear-filter-btn {
+    padding: 6px 12px;
+    background: var(--background-modifier-error);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.clear-filter-btn:hover {
+    opacity: 0.8;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.filter-group label {
+    font-weight: 500;
+    color: var(--text-normal);
+}
+
+.filter-btn {
+    padding: 6px 12px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-normal);
+}
+
+.filter-btn:hover {
+    background: var(--background-modifier-hover);
+}
+
+.date-display {
+    padding: 4px 8px;
+    background: var(--background-modifier-success);
+    color: var(--text-on-accent);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+/* 统计卡片样式 */
+.accounting-stats {
+    margin-bottom: 25px;
+}
+
+.stats-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+    .category-name {
+        font-size: 13px;
+        padding: 6px 10px;
+    }
+    
+    .delete-category-btn {
+        margin-left: 0;
+    }
+}
+
+/* 分类配置模态框样式 - Notion 风格 */
+.category-config-modal {
+    padding: 24px;
+    min-width: 650px;
+    max-width: 700px;
+    background: var(--background-primary);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+/* 标签页样式 - Notion 风格 */
+.config-tabs {
+    display: flex;
+    margin-bottom: 32px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    gap: 4px;
+}
+
+.config-tab {
+    padding: 12px 20px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 15px;
+    font-weight: 500;
+    border-radius: 6px 6px 0 0;
+    transition: all 0.15s ease;
+    position: relative;
+}
+
+.config-tab:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+}
+
+.config-tab.active {
+    color: var(--text-normal);
+    background: var(--background-primary);
+    font-weight: 600;
+}
+
+.config-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--interactive-accent);
+    border-radius: 1px;
+}
+
+.config-content {
+    min-height: 400px;
+}
+
+.config-description {
+    margin-bottom: 24px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.config-description p {
+    margin: 0 0 8px 0;
+}
+
+.config-description p:last-child {
+    margin-bottom: 0;
+}
+
+/* 分类列表样式 - Notion 表格风格 */
+.category-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-bottom: 20px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-primary);
+}
+
+.category-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--background-modifier-border-focus);
+    transition: background 0.15s ease;
+}
+
+.category-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.category-item:last-child {
+    border-bottom: none;
+}
+
+.category-keyword,
+.category-name {
+    padding: 8px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 14px;
+    transition: all 0.15s ease;
+}
+
+.category-keyword {
+    width: 80px;
+    font-family: monospace;
+    text-align: center;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.category-name {
+    width: 120px;
+    flex-shrink: 0;
+}
+
+.category-keyword:focus,
+.category-name:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.delete-category-btn {
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #fef2f2, #fecaca);
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+.delete-category-btn:hover {
+    background: linear-gradient(135deg, #fecaca, #fca5a5);
+    transform: translateY(-1px);
+}
+
+.add-category-btn {
+    width: 100%;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, var(--interactive-accent), #3b82f6);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    transition: all 0.15s ease;
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+.add-category-btn:hover {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+}
+
+/* 预算设置样式 - Notion 风格 */
+.budget-section {
+    margin-bottom: 32px;
+    padding: 20px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.budget-section h3 {
+    margin-bottom: 16px;
+    color: var(--text-normal);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.budget-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+}
+
+.budget-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--interactive-accent);
+}
+
+.budget-toggle span {
+    font-weight: 500;
+    color: var(--text-normal);
+}
+
+.threshold-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+}
+
+.threshold-section label {
+    font-weight: 500;
+    color: var(--text-normal);
+}
+
+.threshold-section input {
+    width: 80px;
+    padding: 6px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-weight: 500;
+}
+
+.budget-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 15px;
+    transition: all 0.15s ease;
+}
+
+.budget-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.budget-input.total-budget {
+    font-size: 18px;
+    font-weight: 600;
+    text-align: center;
+}
+
+.budget-list {
+    display: grid;
+    gap: 14px;
+}
+
+.budget-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    transition: all 0.15s ease;
+}
+
+.budget-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.budget-label {
+    font-weight: 500;
+    color: var(--text-normal);
+    font-size: 15px;
+    flex: 1;
+}
+
+.budget-item .budget-input {
+    width: 150px;
+    flex-shrink: 0;
+}round: var(--background-secondary);
+    border-radius: 6px;
+    transition: all 0.15s ease;
+}
+
+.budget-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.budget-label {
+    font-weight: 500;
+    color: var(--text-normal);
+    font-size: 14px;
+}
+
+/* 按钮组样式 - Notion 风格 */
+.config-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.config-btn {
+    padding: 10px 20px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.config-btn-cancel {
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.config-btn-cancel:hover {
+    background: var(--background-modifier-hover);
+    transform: translateY(-1px);
+}
+
+.config-btn-save {
+    background: linear-gradient(135deg, var(--interactive-accent), #3b82f6);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+.config-btn-save:hover {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+}
+
+/* 配置模态框 - 基础设置 */
+.config-section {
+    margin-bottom: 32px;
+    padding: 20px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.config-section h3 {
+    margin-bottom: 16px;
+    color: var(--text-normal);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.config-input-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.config-input-group label {
+    font-weight: 500;
+    color: var(--text-normal);
+    min-width: 100px;
+}
+
+.config-text-input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 15px;
+    transition: all 0.15s ease;
+}
+
+.config-text-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.config-preview-box {
+    padding: 24px;
+    background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    text-align: center;
+}
+
+.preview-title {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-normal);
+    line-height: 1.2;
+}

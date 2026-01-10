@@ -1,0 +1,10 @@
+{
+    "id": "obsidian-accounting",
+    "name": "每日记账",
+    "version": "1.0.0",
+    "minAppVersion": "1.2.8",
+    "description": "基于日记文件的每日记账插件，支持自动识别和统计记账记录。",
+    "author": "Your Name",
+    "authorUrl": "https://github.com/yourusername",
+    "isDesktopOnly": false
+}

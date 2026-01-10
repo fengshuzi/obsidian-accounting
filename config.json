@@ -1,0 +1,33 @@
+{
+    "appName": "每日记账",
+    "categories": {
+        "cy": "餐饮",
+        "jt": "交通",
+        "yl": "娱乐",
+        "gw": "购物",
+        "yy": "医疗",
+        "jy": "教育",
+        "fz": "房租",
+        "qt": "其他",
+        "sr": "收入"
+    },
+    "budgets": {
+        "monthly": {
+            "total": 5000,
+            "categories": {
+                "cy": 1000,
+                "jt": 500,
+                "yl": 300,
+                "gw": 800,
+                "yy": 200,
+                "jy": 300,
+                "fz": 2000,
+                "qt": 200
+            }
+        },
+        "enableAlerts": true,
+        "alertThreshold": 0.8
+    },
+    "expenseEmoji": "#",
+    "journalsPath": "journals"
+}

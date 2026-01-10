@@ -1,0 +1,31 @@
+{
+  "name": "obsidian-accounting",
+  "version": "1.0.0",
+  "description": "基于日记文件的记账管理插件",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "version": "node version-bump.mjs && git add manifest.json versions.json",
+    "deploy": "bash deploy.sh"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "accounting",
+    "finance",
+    "journal"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.11.6",
+    "@typescript-eslint/eslint-plugin": "5.29.0",
+    "@typescript-eslint/parser": "5.29.0",
+    "builtin-modules": "3.3.0",
+    "esbuild": "0.17.3",
+    "obsidian": "latest",
+    "tslib": "2.4.0",
+    "typescript": "4.7.4"
+  }
+}
