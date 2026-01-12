@@ -86,11 +86,10 @@ class AccountingStorage {
         // 添加缓存机制
         this.cache = {
             records: null,
-            lastUpdate: null,
-            fileModTimes: new Map() // 文件修改时间缓存
+            lastUpdate: null
         };
         
-        // 缓存有效期（30秒）- 短时间缓存，确保新增记录能快速显示
+        // 缓存有效期（30秒）
         this.cacheTimeout = 30 * 1000;
         
         // 监听文件变化
@@ -100,77 +99,60 @@ class AccountingStorage {
     // 设置文件监听器
     setupFileWatcher() {
         // 监听文件修改事件
-        this.app.vault.on('modify', (file) => {
+        this.modifyHandler = (file) => {
             if (file.path.startsWith(this.config.journalsPath) && file.path.endsWith('.md')) {
                 console.log(`检测到日记文件变化: ${file.path}`);
-                // 清除缓存，下次访问时重新加载
                 this.clearCache();
             }
-        });
+        };
         
         // 监听文件创建事件
-        this.app.vault.on('create', (file) => {
+        this.createHandler = (file) => {
             if (file.path.startsWith(this.config.journalsPath) && file.path.endsWith('.md')) {
                 console.log(`检测到新日记文件: ${file.path}`);
                 this.clearCache();
             }
-        });
+        };
         
         // 监听文件删除事件
-        this.app.vault.on('delete', (file) => {
+        this.deleteHandler = (file) => {
             if (file.path.startsWith(this.config.journalsPath) && file.path.endsWith('.md')) {
                 console.log(`检测到日记文件删除: ${file.path}`);
                 this.clearCache();
             }
-        });
+        };
+        
+        this.app.vault.on('modify', this.modifyHandler);
+        this.app.vault.on('create', this.createHandler);
+        this.app.vault.on('delete', this.deleteHandler);
     }
     
     // 销毁监听器
     destroy() {
-        this.app.vault.off('modify');
-        this.app.vault.off('create');
-        this.app.vault.off('delete');
+        if (this.modifyHandler) {
+            this.app.vault.off('modify', this.modifyHandler);
+        }
+        if (this.createHandler) {
+            this.app.vault.off('create', this.createHandler);
+        }
+        if (this.deleteHandler) {
+            this.app.vault.off('delete', this.deleteHandler);
+        }
     }
     
-    // 检查缓存是否有效 - 简化版本，主要依靠文件监听
+    // 检查缓存是否有效
     isCacheValid() {
-        // 如果没有缓存数据，无效
         if (!this.cache.records || !this.cache.lastUpdate) {
             return false;
         }
         
-        // 如果缓存时间超过30秒，也认为无效（兜底机制）
         const now = Date.now();
         if ((now - this.cache.lastUpdate) > this.cacheTimeout) {
-            console.log('缓存超时，需要刷新');
+            console.log('缓存已过期');
             return false;
         }
         
         return true;
-    }
-    
-    // 简化的文件更新检查 - 现在主要依靠事件监听
-    async hasFileUpdates() {
-        // 由于有文件监听，这里可以简化
-        // 如果缓存被清除了，说明有文件更新
-        return !this.cache.records;
-    }
-    
-    // 更新文件修改时间缓存
-    async updateFileModTimes() {
-        const { vault } = this.app;
-        const files = vault.getMarkdownFiles().filter(file => 
-            file.path.startsWith(this.config.journalsPath)
-        );
-        
-        for (const file of files) {
-            try {
-                const stat = await vault.adapter.stat(file.path);
-                this.cache.fileModTimes.set(file.path, stat.mtime);
-            } catch (error) {
-                // 忽略无法获取状态的文件
-            }
-        }
     }
 
     // 获取所有记账记录 - 智能缓存版本
@@ -218,7 +200,25 @@ class AccountingStorage {
     clearCache() {
         this.cache.records = null;
         this.cache.lastUpdate = null;
-        this.cache.fileModTimes.clear();
+    }
+
+    // 获取所有记账记录 - 每次都实时加载
+    async getAllRecords(forceRefresh = false) {
+        console.log('加载记账记录...');
+        
+        let records = [];
+        
+        try {
+            // 优先使用搜索方式，更高效
+            records = await this.getAllRecordsBySearch();
+            
+            return records;
+            
+        } catch (error) {
+            console.error('获取记账记录失败:', error);
+            new Notice('获取记账记录失败，请检查日记文件夹');
+            return [];
+        }
     }
     
     // 使用搜索 API 的方式 - 基于配置的关键词搜索
@@ -345,7 +345,9 @@ class AccountingStorage {
             console.log('搜索引擎访问失败:', error);
         }
         
-        throw new Error('搜索引擎未找到结果');
+        // 搜索引擎未找到结果，返回空数组而不是抛出错误
+        console.log('搜索引擎未找到结果，将使用自定义搜索');
+        return [];
     }
     
     // 自定义关键词搜索实现 - 只扫描日期格式的文件
@@ -1510,7 +1512,13 @@ class AccountingView extends ItemView {
         const dayHeader = dayGroup.createDiv('day-header');
         const dayTotal = records.reduce((sum, r) => sum + (r.isIncome ? r.amount : -r.amount), 0);
         
-        dayHeader.createSpan({ text: this.formatDateDisplay(date), cls: 'day-date' });
+        const dateSpan = dayHeader.createSpan({ text: this.formatDateDisplay(date), cls: 'day-date clickable' });
+        
+        // 添加点击事件，打开对应日期的日记
+        dateSpan.onclick = async () => {
+            await this.openJournalFile(date);
+        };
+        
         dayHeader.createSpan({ 
             text: `¥${dayTotal.toFixed(2)}`, 
             cls: `day-total ${dayTotal >= 0 ? 'positive' : 'negative'}`
@@ -1707,14 +1715,10 @@ class AccountingPlugin extends Plugin {
             appName: "每日记账",
             categories: {
                 "cy": "餐饮",
-                "jt": "交通", 
-                "yl": "娱乐",
                 "gw": "购物",
-                "yy": "医疗",
-                "jy": "教育",
-                "fz": "房租",
-                "qt": "其他",
-                "sr": "收入"
+                "dk": "贷款",
+                "jf": "生活缴费",
+                "qt": "其他"
             },
             expenseEmoji: "#",
             journalsPath: "journals"

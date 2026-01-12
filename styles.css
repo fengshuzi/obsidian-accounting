@@ -387,6 +387,16 @@
     font-size: 15px;
 }
 
+.day-date.clickable {
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.day-date.clickable:hover {
+    color: var(--interactive-accent);
+    text-decoration: underline;
+}
+
 .day-total {
     font-weight: 700;
     font-size: 16px;
