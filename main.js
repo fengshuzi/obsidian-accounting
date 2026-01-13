@@ -1689,6 +1689,11 @@ class AccountingPlugin extends Plugin {
         
         // 激活视图
         workspace.setActiveLeaf(leaf, { focus: true });
+        
+        // 强制刷新数据
+        if (leaf.view instanceof AccountingView) {
+            await leaf.view.loadAllRecords(true);
+        }
     }
 
     async refreshData() {
