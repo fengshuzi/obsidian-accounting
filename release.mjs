@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 
 // 检查是否使用 --force 参数
 const forceMode = process.argv.includes('--force');
@@ -28,7 +28,28 @@ try {
     process.exit(1);
   }
 
-  // 3. 创建 git tag
+  // 3. 自动检测 main.js 位置
+  let mainJsPath;
+  if (existsSync('dist/main.js')) {
+    mainJsPath = 'dist/main.js';
+  } else if (existsSync('build/main.js')) {
+    mainJsPath = 'build/main.js';
+  } else if (existsSync('main.js')) {
+    mainJsPath = 'main.js';
+  } else {
+    console.error('❌ 找不到 main.js 文件');
+    process.exit(1);
+  }
+  console.log(`📄 检测到 main.js: ${mainJsPath}\n`);
+
+  // 4. 检测其他文件
+  const files = [mainJsPath, 'manifest.json'];
+  if (existsSync('styles.css')) files.push('styles.css');
+  if (existsSync('config.json')) files.push('config.json');
+  
+  console.log(`📦 将上传文件: ${files.join(', ')}\n`);
+
+  // 5. 创建 git tag
   console.log(`📌 创建 tag: ${tag}`);
   try {
     if (forceMode) {
@@ -66,15 +87,16 @@ try {
     }
   }
 
-  // 4. 推送 tag
+  // 6. 推送 tag
   console.log('⬆️  推送 tag 到 GitHub...');
   execSync(`git push origin ${tag}`, { stdio: 'inherit' });
   console.log('✅ Tag 推送成功\n');
 
-  // 5. 创建 GitHub Release
+  // 7. 创建 GitHub Release
   console.log('🎉 创建 GitHub Release...');
+  const filesArg = files.join(' ');
   execSync(
-    `gh release create ${tag} dist/main.js manifest.json styles.css config.json --title "${tag}" --notes "Release ${version}"`,
+    `gh release create ${tag} ${filesArg} --title "${tag}" --notes "Release ${version}"`,
     { stdio: 'inherit' }
   );
   console.log('\n✅ Release 创建成功！\n');
