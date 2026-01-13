@@ -888,11 +888,10 @@ class CategoryConfigModal extends Modal {
             this.plugin.config.budgets = this.budgets;
             
             // 保存到文件
-            const configFile = this.app.vault.getAbstractFileByPath('obsidian-accounting/config.json');
-            if (configFile) {
-                const configContent = JSON.stringify(this.plugin.config, null, 4);
-                await this.app.vault.modify(configFile, configContent);
-            }
+            const configPath = `${this.plugin.manifest.dir}/config.json`;
+            const adapter = this.app.vault.adapter;
+            const configContent = JSON.stringify(this.plugin.config, null, 4);
+            await adapter.write(configPath, configContent);
 
             // 清除缓存，重新加载数据
             this.plugin.storage.clearCache();
@@ -1613,46 +1612,20 @@ class AccountingPlugin extends Plugin {
     }
 
     async loadConfig() {
-        // 加载配置文件
-        const configFile = this.app.vault.getAbstractFileByPath('obsidian-accounting/config.json');
-        if (configFile instanceof TFile) {
-            try {
-                const configContent = await this.app.vault.read(configFile);
+        try {
+            const configPath = `${this.manifest.dir}/config.json`;
+            const adapter = this.app.vault.adapter;
+            
+            if (await adapter.exists(configPath)) {
+                const configContent = await adapter.read(configPath);
                 this.config = JSON.parse(configContent);
-                
-                // 兼容旧版本配置：自动补充缺失的字段
-                let needUpdate = false;
-                
-                // 如果没有 appName 字段，添加默认值
-                if (!this.config.appName) {
-                    this.config.appName = "每日记账";
-                    needUpdate = true;
-                    console.log('自动添加 appName 配置字段');
-                }
-                
-                // 如果没有 budgets 字段，添加默认值
-                if (!this.config.budgets) {
-                    this.config.budgets = {
-                        monthly: { total: 0, categories: {} },
-                        enableAlerts: true,
-                        alertThreshold: 0.8
-                    };
-                    needUpdate = true;
-                    console.log('自动添加 budgets 配置字段');
-                }
-                
-                // 如果配置有更新，保存回文件
-                if (needUpdate) {
-                    const updatedContent = JSON.stringify(this.config, null, 4);
-                    await this.app.vault.modify(configFile, updatedContent);
-                    console.log('配置文件已自动更新');
-                }
-                
-            } catch (error) {
-                console.error('加载配置失败:', error);
+                console.log('配置加载成功:', this.config);
+            } else {
+                console.log('配置文件不存在，使用默认配置');
                 this.config = this.getDefaultConfig();
             }
-        } else {
+        } catch (error) {
+            console.error('加载配置失败:', error);
             this.config = this.getDefaultConfig();
         }
     }
