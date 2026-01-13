@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 
 // 检查是否使用 --force 参数
-const forceMode = process.argv.includes('--force');
+let forceMode = process.argv.includes('--force');
 
 // 读取 manifest.json 获取版本号
 const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
@@ -52,37 +52,42 @@ try {
   // 5. 创建 git tag
   console.log(`📌 创建 tag: ${tag}`);
   try {
-    if (forceMode) {
-      // 强制模式：删除本地和远程的旧tag
-      console.log('⚠️  强制模式：删除旧 tag...');
-      try {
-        execSync(`git tag -d ${tag}`, { stdio: 'pipe' });
-        console.log('  ✓ 删除本地 tag');
-      } catch (e) {
-        // 本地tag不存在，忽略
-      }
-      try {
-        execSync(`git push origin :refs/tags/${tag}`, { stdio: 'pipe' });
-        console.log('  ✓ 删除远程 tag');
-      } catch (e) {
-        // 远程tag不存在，忽略
-      }
-      try {
-        execSync(`gh release delete ${tag} -y`, { stdio: 'pipe' });
-        console.log('  ✓ 删除旧 release');
-      } catch (e) {
-        // release不存在，忽略
-      }
-    }
     execSync(`git tag ${tag}`, { stdio: 'pipe' });
     console.log('✅ Tag 创建成功\n');
   } catch (error) {
-    if (forceMode) {
+    // Tag 已存在，自动启用强制模式
+    if (!forceMode) {
+      console.log('⚠️  Tag 已存在，自动启用强制模式...\n');
+      forceMode = true;
+    }
+    
+    // 强制模式：删除本地和远程的旧tag
+    console.log('🔄 删除旧 tag...');
+    try {
+      execSync(`git tag -d ${tag}`, { stdio: 'pipe' });
+      console.log('  ✓ 删除本地 tag');
+    } catch (e) {
+      // 本地tag不存在，忽略
+    }
+    try {
+      execSync(`git push origin :refs/tags/${tag}`, { stdio: 'pipe' });
+      console.log('  ✓ 删除远程 tag');
+    } catch (e) {
+      // 远程tag不存在，忽略
+    }
+    try {
+      execSync(`gh release delete ${tag} -y`, { stdio: 'pipe' });
+      console.log('  ✓ 删除旧 release');
+    } catch (e) {
+      // release不存在，忽略
+    }
+    
+    // 重新创建 tag
+    try {
+      execSync(`git tag ${tag}`, { stdio: 'pipe' });
+      console.log('✅ Tag 重新创建成功\n');
+    } catch (e) {
       console.error('❌ Tag 创建失败');
-      process.exit(1);
-    } else {
-      console.log('⚠️  Tag 已存在，使用 --force 参数可强制覆盖\n');
-      console.log('   npm run release -- --force\n');
       process.exit(1);
     }
   }
