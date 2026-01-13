@@ -91,53 +91,6 @@ class AccountingStorage {
         
         // 缓存有效期（30秒）
         this.cacheTimeout = 30 * 1000;
-        
-        // 监听文件变化
-        this.setupFileWatcher();
-    }
-    
-    // 设置文件监听器
-    setupFileWatcher() {
-        // 监听文件修改事件
-        this.modifyHandler = (file) => {
-            if (file.path.startsWith(this.config.journalsPath) && file.path.endsWith('.md')) {
-                console.log(`检测到日记文件变化: ${file.path}`);
-                this.clearCache();
-            }
-        };
-        
-        // 监听文件创建事件
-        this.createHandler = (file) => {
-            if (file.path.startsWith(this.config.journalsPath) && file.path.endsWith('.md')) {
-                console.log(`检测到新日记文件: ${file.path}`);
-                this.clearCache();
-            }
-        };
-        
-        // 监听文件删除事件
-        this.deleteHandler = (file) => {
-            if (file.path.startsWith(this.config.journalsPath) && file.path.endsWith('.md')) {
-                console.log(`检测到日记文件删除: ${file.path}`);
-                this.clearCache();
-            }
-        };
-        
-        this.app.vault.on('modify', this.modifyHandler);
-        this.app.vault.on('create', this.createHandler);
-        this.app.vault.on('delete', this.deleteHandler);
-    }
-    
-    // 销毁监听器
-    destroy() {
-        if (this.modifyHandler) {
-            this.app.vault.off('modify', this.modifyHandler);
-        }
-        if (this.createHandler) {
-            this.app.vault.off('create', this.createHandler);
-        }
-        if (this.deleteHandler) {
-            this.app.vault.off('delete', this.deleteHandler);
-        }
     }
     
     // 检查缓存是否有效
@@ -1656,12 +1609,6 @@ class AccountingPlugin extends Plugin {
 
     async onunload() {
         console.log('卸载记账管理插件');
-        
-        // 清理文件监听器
-        if (this.storage) {
-            this.storage.destroy();
-        }
-        
         this.app.workspace.detachLeavesOfType(ACCOUNTING_VIEW);
     }
 
