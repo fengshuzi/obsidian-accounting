@@ -1,5 +1,69 @@
 import { Plugin, ItemView, Modal, Notice, Menu, TFile } from 'obsidian';
 
+// 类型定义
+interface AccountingConfig {
+    appName: string;
+    categories: Record<string, string>;
+    expenseEmoji: string;
+    journalsPath: string;
+    defaultCategory?: string; // 默认分类关键词
+    budgets?: {
+        monthly: {
+            total: number;
+            categories: Record<string, number>;
+        };
+        enableAlerts: boolean;
+        alertThreshold: number;
+    };
+}
+
+interface AccountingRecord {
+    date: string;
+    fileDate: string;
+    keyword: string;
+    category: string;
+    amount: number;
+    isIncome: boolean;
+    description: string;
+    rawLine: string;
+    isBackfill: boolean;
+}
+
+interface AccountingStats {
+    totalIncome: number;
+    totalExpense: number;
+    categoryStats: Record<string, {
+        total: number;
+        count: number;
+        records: AccountingRecord[];
+    }>;
+    dailyStats: Record<string, {
+        income: number;
+        expense: number;
+        records: AccountingRecord[];
+    }>;
+    budgetStatus: BudgetStatus | null;
+}
+
+interface BudgetStatus {
+    totalBudget: number;
+    totalSpent: number;
+    totalRemaining: number;
+    totalProgress: number;
+    categories: Record<string, {
+        budget: number;
+        spent: number;
+        remaining: number;
+        progress: number;
+        keyword: string;
+    }>;
+    alerts: Array<{
+        type: 'warning' | 'exceeded';
+        category: string;
+        message: string;
+    }>;
+}
+
 // 辅助函数：格式化本地日期为 YYYY-MM-DD（避免 UTC 时区问题）
 function formatLocalDate(date: Date): string {
     const year = date.getFullYear();
@@ -10,12 +74,14 @@ function formatLocalDate(date: Date): string {
 
 // 记账记录解析器
 class AccountingParser {
-    constructor(config) {
+    config: AccountingConfig;
+    
+    constructor(config: AccountingConfig) {
         this.config = config;
     }
 
     // 解析单行记账记录
-    parseRecord(line, fileDate) {
+    parseRecord(line: string, fileDate: string): AccountingRecord | null {
         const { categories, expenseEmoji } = this.config;
         
         // 检查是否包含记账表情符号
@@ -65,9 +131,9 @@ class AccountingParser {
     }
 
     // 解析文件内容
-    parseFileContent(content, filePath) {
+    parseFileContent(content: string, filePath: string): AccountingRecord[] {
         const lines = content.split('\n');
-        const records = [];
+        const records: AccountingRecord[] = [];
         
         // 从文件路径提取日期
         const dateMatch = filePath.match(/(\d{4}-\d{2}-\d{2})/);
@@ -86,7 +152,16 @@ class AccountingParser {
 
 // 记账数据管理器
 class AccountingStorage {
-    constructor(app, config) {
+    app: any;
+    config: AccountingConfig;
+    parser: AccountingParser;
+    cache: {
+        records: AccountingRecord[] | null;
+        lastUpdate: number | null;
+    };
+    cacheTimeout: number;
+    
+    constructor(app: any, config: AccountingConfig) {
         this.app = app;
         this.config = config;
         this.parser = new AccountingParser(config);
@@ -164,7 +239,7 @@ class AccountingStorage {
     }
 
     // 获取所有记账记录 - 每次都实时加载
-    async getAllRecords(forceRefresh = false) {
+    async getAllRecords(forceRefresh = false): Promise<AccountingRecord[]> {
         console.log('加载记账记录...');
         
         let records = [];
@@ -183,8 +258,8 @@ class AccountingStorage {
     }
     
     // 使用搜索 API 的方式 - 基于配置的关键词搜索
-    async getAllRecordsBySearch() {
-        const records = [];
+    async getAllRecordsBySearch(): Promise<AccountingRecord[]> {
+        const records: AccountingRecord[] = [];
         const { expenseEmoji, categories } = this.config;
         
         try {
@@ -449,7 +524,7 @@ class AccountingStorage {
     }
 
     // 按日期范围筛选记录
-    filterRecordsByDateRange(records, startDate, endDate) {
+    filterRecordsByDateRange(records: AccountingRecord[], startDate: string, endDate: string): AccountingRecord[] {
         return records.filter(record => {
             const recordDate = new Date(record.date);
             return recordDate >= new Date(startDate) && recordDate <= new Date(endDate);
@@ -457,8 +532,8 @@ class AccountingStorage {
     }
 
     // 统计数据
-    calculateStatistics(records) {
-        const stats = {
+    calculateStatistics(records: AccountingRecord[]): AccountingStats {
+        const stats: AccountingStats = {
             totalIncome: 0,
             totalExpense: 0,
             categoryStats: {},
@@ -508,7 +583,7 @@ class AccountingStorage {
     }
     
     // 计算预算状态
-    calculateBudgetStatus(stats) {
+    calculateBudgetStatus(stats: AccountingStats): BudgetStatus | null {
         const budgets = this.config.budgets;
         if (!budgets || !budgets.enableAlerts) {
             return null;
@@ -571,7 +646,16 @@ class AccountingStorage {
 
 // 分类配置模态框
 class CategoryConfigModal extends Modal {
-    constructor(app, plugin) {
+    plugin: any;
+    appName: string;
+    categories: Record<string, string>;
+    budgets: AccountingConfig['budgets'];
+    currentTab: string;
+    contentArea: HTMLElement;
+    categoryList: HTMLElement;
+    budgetList: HTMLElement;
+    
+    constructor(app: any, plugin: any) {
         super(app);
         this.plugin = plugin;
         this.appName = plugin.config.appName || '记账软件'; // 应用名称
@@ -662,7 +746,7 @@ class CategoryConfigModal extends Modal {
         // 说明文字
         const description = this.contentArea.createDiv('config-description');
         description.innerHTML = `
-            <p>自定义应用名称，让记账软件更具个性化</p>
+            <p>自定义应用名称和默认分类，让记账软件更具个性化</p>
         `;
 
         // 应用名称设置
@@ -680,6 +764,31 @@ class CategoryConfigModal extends Modal {
         nameInput.oninput = () => {
             this.appName = nameInput.value.trim() || '每日记账';
         };
+
+        // 默认分类设置
+        const defaultCategorySection = this.contentArea.createDiv('config-section');
+        defaultCategorySection.createEl('h3', { text: '默认分类' });
+        
+        const defaultCategoryGroup = defaultCategorySection.createDiv('config-input-group');
+        defaultCategoryGroup.createEl('label', { text: '快速记账默认分类：' });
+        
+        const defaultCategorySelect = defaultCategoryGroup.createEl('select', {
+            cls: 'config-select-input'
+        });
+        
+        // 添加分类选项
+        Object.entries(this.categories).forEach(([keyword, categoryName]) => {
+            const option = defaultCategorySelect.createEl('option', {
+                value: keyword,
+                text: `${categoryName} (${keyword})`
+            });
+            
+            // 设置当前选中的默认分类
+            const currentDefault = this.plugin.config.defaultCategory || 'cy';
+            if (keyword === currentDefault) {
+                option.selected = true;
+            }
+        });
 
         // 预览效果
         const previewSection = this.contentArea.createDiv('config-section');
@@ -890,9 +999,14 @@ class CategoryConfigModal extends Modal {
                 return;
             }
 
+            // 获取默认分类选择
+            const defaultCategorySelect = document.querySelector('.config-select-input') as HTMLSelectElement;
+            const defaultCategory = defaultCategorySelect ? defaultCategorySelect.value : 'cy';
+
             // 更新配置
             this.plugin.config.appName = cleanAppName;
             this.plugin.config.categories = cleanCategories;
+            this.plugin.config.defaultCategory = defaultCategory;
             this.plugin.config.budgets = this.budgets;
             
             // 保存到文件
@@ -924,7 +1038,11 @@ class CategoryConfigModal extends Modal {
     }
 }
 class DateRangeModal extends Modal {
-    constructor(app, options) {
+    options: any;
+    startInput: HTMLInputElement;
+    endInput: HTMLInputElement;
+    
+    constructor(app: any, options: any) {
         super(app);
         this.options = options;
     }
@@ -990,11 +1108,198 @@ class DateRangeModal extends Modal {
     }
 }
 
+// 快速记账模态框
+class QuickEntryModal extends Modal {
+    plugin: any;
+    onSave: () => Promise<void>;
+    selectedCategory: string | null;
+    amount: string;
+    description: string;
+    amountInput: HTMLInputElement;
+    descInput: HTMLInputElement;
+    
+    constructor(app: any, plugin: any, onSave: () => Promise<void>) {
+        super(app);
+        this.plugin = plugin;
+        this.onSave = onSave;
+        this.selectedCategory = null;
+        this.amount = '';
+        this.description = '';
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('quick-entry-modal');
+
+        this.titleEl.setText('快速记账');
+
+        // 分类选择
+        const categorySection = contentEl.createDiv('entry-section');
+        categorySection.createEl('label', { text: '选择分类', cls: 'entry-label' });
+        
+        const categoryGrid = categorySection.createDiv('category-grid');
+        
+        // 创建分类按钮
+        Object.entries(this.plugin.config.categories).forEach(([keyword, categoryName]) => {
+            const isIncome = keyword === 'sr';
+            const btn = categoryGrid.createEl('button', {
+                text: categoryName,
+                cls: `category-btn ${isIncome ? 'income-btn' : 'expense-btn'}`
+            });
+            btn.setAttribute('data-keyword', keyword);
+            btn.onclick = () => this.selectCategory(keyword, btn);
+        });
+
+        // 金额输入
+        const amountSection = contentEl.createDiv('entry-section');
+        amountSection.createEl('label', { text: '金额', cls: 'entry-label' });
+        
+        this.amountInput = amountSection.createEl('input', {
+            type: 'number',
+            cls: 'entry-input',
+            attr: { 
+                placeholder: '请输入金额',
+                min: '0',
+                step: '0.01'
+            }
+        });
+        this.amountInput.focus();
+
+        // 描述输入
+        const descSection = contentEl.createDiv('entry-section');
+        descSection.createEl('label', { text: '备注（可选）', cls: 'entry-label' });
+        
+        this.descInput = descSection.createEl('input', {
+            type: 'text',
+            cls: 'entry-input',
+            attr: { 
+                placeholder: '添加备注信息',
+                maxlength: '100'
+            }
+        });
+
+        // 按钮组
+        const buttons = contentEl.createDiv('entry-buttons');
+        
+        const cancelBtn = buttons.createEl('button', {
+            text: '取消',
+            cls: 'entry-btn entry-btn-cancel'
+        });
+        cancelBtn.onclick = () => this.close();
+
+        const saveBtn = buttons.createEl('button', {
+            text: '保存',
+            cls: 'entry-btn entry-btn-save'
+        });
+        saveBtn.onclick = () => this.saveEntry();
+
+        // 回车保存
+        this.amountInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.saveEntry();
+            }
+        });
+        
+        this.descInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.saveEntry();
+            }
+        });
+    }
+
+    selectCategory(keyword: string, buttonEl: HTMLElement) {
+        // 清除其他按钮的选中状态
+        document.querySelectorAll('.category-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        
+        // 选中当前按钮
+        buttonEl.classList.add('selected');
+        this.selectedCategory = keyword;
+    }
+
+    async saveEntry() {
+        // 验证输入
+        if (!this.selectedCategory) {
+            new Notice('请选择分类');
+            return;
+        }
+
+        const amount = parseFloat(this.amountInput.value);
+        if (!amount || amount <= 0) {
+            new Notice('请输入有效金额');
+            return;
+        }
+
+        const description = this.descInput.value.trim();
+
+        try {
+            // 获取今天的日记文件路径
+            const today = new Date();
+            const dateStr = formatLocalDate(today);
+            const journalPath = `${this.plugin.config.journalsPath}/${dateStr}.md`;
+            
+            // 构建记账记录（不带换行符，添加列表符号）
+            const emoji = this.plugin.config.expenseEmoji;
+            const record = `- ${emoji}${this.selectedCategory} ${amount}${description ? ' ' + description : ''}`;
+            
+            // 检查文件是否存在
+            const file = this.app.vault.getAbstractFileByPath(journalPath);
+            
+            if (file instanceof TFile) {
+                // 文件存在，智能追加内容
+                let content = await this.app.vault.read(file);
+                
+                // 移除末尾的空行或仅含 "-" 的占位行
+                const lines = content.split('\n');
+                while (lines.length > 0 && (lines[lines.length - 1].trim() === '' || lines[lines.length - 1].trim() === '-')) {
+                    lines.pop();
+                }
+                
+                // 重新组合内容
+                let newContent = lines.join('\n');
+                
+                // 如果文件非空，添加一个换行符再追加新记录
+                if (newContent.length > 0) {
+                    newContent += '\n' + record;
+                } else {
+                    // 文件为空，直接写入记录
+                    newContent = record;
+                }
+                
+                await this.app.vault.modify(file, newContent);
+            } else {
+                // 文件不存在，创建新文件（不带末尾换行）
+                await this.app.vault.create(journalPath, record);
+            }
+
+            new Notice('记账成功');
+            this.close();
+            
+            // 调用保存后的回调
+            if (this.onSave) {
+                await this.onSave();
+            }
+        } catch (error) {
+            console.error('保存记账记录失败:', error);
+            new Notice('保存失败，请检查日记文件夹');
+        }
+    }
+}
+
 // 记账视图
 const ACCOUNTING_VIEW = 'accounting-view';
 
 class AccountingView extends ItemView {
-    constructor(leaf, plugin) {
+    plugin: any;
+    currentRecords: AccountingRecord[];
+    currentStats: AccountingStats;
+    statsContainer: HTMLElement;
+    recordsContainer: HTMLElement;
+    timeDisplay: HTMLElement;
+    
+    constructor(leaf: any, plugin: any) {
         super(leaf);
         this.plugin = plugin;
         this.currentRecords = [];
@@ -1043,6 +1348,12 @@ class AccountingView extends ItemView {
         header.createEl('h2', { text: `💰 ${appName}`, cls: 'accounting-title' });
         
         const actions = header.createDiv('accounting-actions');
+        
+        const quickEntryBtn = actions.createEl('button', {
+            text: '快速记账',
+            cls: 'accounting-btn accounting-btn-primary'
+        });
+        quickEntryBtn.onclick = () => this.showQuickEntryModal();
         
         const refreshBtn = actions.createEl('button', {
             text: '刷新数据',
@@ -1213,7 +1524,7 @@ class AccountingView extends ItemView {
         this.updateRecordsDisplay();
     }
 
-    async loadAllRecords(forceRefresh = false) {
+    async loadAllRecords(forceRefresh = false): Promise<void> {
         try {
             this.currentRecords = await this.plugin.storage.getAllRecords(forceRefresh);
             this.currentStats = this.plugin.storage.calculateStatistics(this.currentRecords);
@@ -1574,10 +1885,20 @@ class AccountingView extends ItemView {
     showConfigModal() {
         new CategoryConfigModal(this.app, this.plugin).open();
     }
+    
+    showQuickEntryModal() {
+        new QuickEntryModal(this.app, this.plugin, async () => {
+            // 保存后的回调：刷新数据
+            await this.loadAllRecords(true);
+        }).open();
+    }
 }
 
 // 主插件类
 export default class AccountingPlugin extends Plugin {
+    config: AccountingConfig;
+    storage: AccountingStorage;
+    
     async onload() {
         console.log('加载记账管理插件');
 
@@ -1644,6 +1965,7 @@ export default class AccountingPlugin extends Plugin {
                 "jf": "生活缴费",
                 "qt": "其他"
             },
+            defaultCategory: "cy", // 默认分类为餐饮
             expenseEmoji: "#",
             journalsPath: "journals"
         };
