@@ -105,4 +105,4 @@ dist
 .tern-port
 
 # Obsidian workspace
-.obsidian/
+.obsidian/dist
