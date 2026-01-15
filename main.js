@@ -1554,9 +1554,17 @@ class AccountingView extends ItemView {
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
         
-        if (dateStr === today.toISOString().split('T')[0]) {
+        // 使用本地日期格式，避免 UTC 时区问题
+        const todayStr = today.getFullYear() + '-' + 
+            String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+            String(today.getDate()).padStart(2, '0');
+        const yesterdayStr = yesterday.getFullYear() + '-' + 
+            String(yesterday.getMonth() + 1).padStart(2, '0') + '-' + 
+            String(yesterday.getDate()).padStart(2, '0');
+        
+        if (dateStr === todayStr) {
             return '今天';
-        } else if (dateStr === yesterday.toISOString().split('T')[0]) {
+        } else if (dateStr === yesterdayStr) {
             return '昨天';
         } else {
             return date.toLocaleDateString('zh-CN', { 
@@ -1680,4 +1688,3 @@ class AccountingPlugin extends Plugin {
 }
 
 module.exports = AccountingPlugin;
- No newline at end of file
