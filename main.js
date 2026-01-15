@@ -1,0 +1,1683 @@
+const { Plugin, ItemView, Modal, Notice, Menu, TFile } = require('obsidian');
+
+// 记账记录解析器
+class AccountingParser {
+    constructor(config) {
+        this.config = config;
+    }
+
+    // 解析单行记账记录
+    parseRecord(line, fileDate) {
+        const { categories, expenseEmoji } = this.config;
+        
+        // 检查是否包含记账表情符号
+        if (!line.includes(expenseEmoji)) {
+            return null;
+        }
+
+        // 创建关键词列表，按长度排序（避免短关键词匹配长关键词的一部分）
+        const keywords = Object.keys(categories).sort((a, b) => b.length - a.length);
+        const keywordPattern = keywords.join('|');
+        
+        // 提取记账信息 - 只匹配配置中定义的关键词
+        const regex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s+([\\d.]+)\\s*(.*)`, 'g');
+        const match = regex.exec(line);
+        
+        if (!match) return null;
+
+        const [, keyword, amount, description] = match;
+        const category = categories[keyword] || '未分类';
+        const isIncome = keyword === 'sr';
+        
+        // 检查描述中是否包含日期（支持账单补录）
+        let recordDate = fileDate;
+        const dateRegex = /(\d{4}-\d{2}-\d{2})/;
+        const dateMatch = description.match(dateRegex);
+        
+        if (dateMatch) {
+            // 验证日期格式是否有效
+            const parsedDate = new Date(dateMatch[1]);
+            if (!isNaN(parsedDate.getTime())) {
+                recordDate = dateMatch[1];
+                console.log(`检测到补录日期: ${recordDate} (原文件日期: ${fileDate})`);
+            }
+        }
+        
+        return {
+            date: recordDate,
+            fileDate: fileDate, // 保留原文件日期用于追溯
+            keyword,
+            category,
+            amount: parseFloat(amount),
+            isIncome,
+            description: description.trim(),
+            rawLine: line.trim(),
+            isBackfill: recordDate !== fileDate // 标记是否为补录
+        };
+    }
+
+    // 解析文件内容
+    parseFileContent(content, filePath) {
+        const lines = content.split('\n');
+        const records = [];
+        
+        // 从文件路径提取日期
+        const dateMatch = filePath.match(/(\d{4}-\d{2}-\d{2})/);
+        const fileDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+
+        lines.forEach(line => {
+            const record = this.parseRecord(line, fileDate);
+            if (record) {
+                records.push(record);
+            }
+        });
+
+        return records;
+    }
+}
+
+// 记账数据管理器
+class AccountingStorage {
+    constructor(app, config) {
+        this.app = app;
+        this.config = config;
+        this.parser = new AccountingParser(config);
+        
+        // 添加缓存机制
+        this.cache = {
+            records: null,
+            lastUpdate: null
+        };
+        
+        // 缓存有效期（30秒）
+        this.cacheTimeout = 30 * 1000;
+    }
+    
+    // 检查缓存是否有效
+    isCacheValid() {
+        if (!this.cache.records || !this.cache.lastUpdate) {
+            return false;
+        }
+        
+        const now = Date.now();
+        if ((now - this.cache.lastUpdate) > this.cacheTimeout) {
+            console.log('缓存已过期');
+            return false;
+        }
+        
+        return true;
+    }
+
+    // 获取所有记账记录 - 智能缓存版本
+    async getAllRecords(forceRefresh = false) {
+        // 如果强制刷新，清除缓存
+        if (forceRefresh) {
+            this.clearCache();
+        }
+        
+        // 如果缓存有效，直接返回
+        if (this.isCacheValid()) {
+            console.log('使用缓存的记账记录');
+            return this.cache.records;
+        }
+        
+        console.log('重新加载记账记录...');
+        
+        let records = [];
+        
+        try {
+            // 优先使用搜索方式，更高效
+            records = await this.getAllRecordsBySearch();
+            
+            // 更新缓存
+            this.cache.records = records;
+            this.cache.lastUpdate = Date.now();
+            
+            return records;
+            
+        } catch (error) {
+            console.error('获取记账记录失败:', error);
+            new Notice('获取记账记录失败，请检查日记文件夹');
+            
+            // 如果有缓存，返回缓存数据
+            if (this.cache.records) {
+                new Notice('使用缓存数据');
+                return this.cache.records;
+            }
+            
+            return [];
+        }
+    }
+    
+    // 清除缓存
+    clearCache() {
+        this.cache.records = null;
+        this.cache.lastUpdate = null;
+    }
+
+    // 获取所有记账记录 - 每次都实时加载
+    async getAllRecords(forceRefresh = false) {
+        console.log('加载记账记录...');
+        
+        let records = [];
+        
+        try {
+            // 优先使用搜索方式，更高效
+            records = await this.getAllRecordsBySearch();
+            
+            return records;
+            
+        } catch (error) {
+            console.error('获取记账记录失败:', error);
+            new Notice('获取记账记录失败，请检查日记文件夹');
+            return [];
+        }
+    }
+    
+    // 使用搜索 API 的方式 - 基于配置的关键词搜索
+    async getAllRecordsBySearch() {
+        const records = [];
+        const { expenseEmoji, categories } = this.config;
+        
+        try {
+            // 获取所有配置的关键词
+            const keywords = Object.keys(categories);
+            console.log(`开始基于关键词搜索: ${keywords.map(k => expenseEmoji + k).join(', ')}`);
+            
+            // 使用关键词搜索文件
+            const searchResults = await this.searchFilesWithKeywords(keywords, expenseEmoji);
+            
+            console.log(`通过关键词搜索找到 ${searchResults.length} 个包含记账记录的文件`);
+            
+            // 只处理搜索到的文件
+            for (const file of searchResults) {
+                try {
+                    const content = await this.app.vault.read(file);
+                    const fileRecords = this.parser.parseFileContent(content, file.path);
+                    if (fileRecords.length > 0) {
+                        console.log(`在 ${file.path} 中找到 ${fileRecords.length} 条记账记录`);
+                        records.push(...fileRecords);
+                    }
+                } catch (error) {
+                    console.error(`读取搜索结果文件 ${file.path} 失败:`, error);
+                }
+            }
+            
+            console.log(`总共找到 ${records.length} 条记账记录`);
+            return records.sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+        } catch (error) {
+            console.error('关键词搜索功能失败:', error);
+            // 如果搜索失败，回退到优化的遍历方式
+            console.log('回退到传统扫描方式...');
+            return await this.getAllRecordsByOptimizedTraversal();
+        }
+    }
+    
+    // 搜索包含指定关键词的文件 - 使用 Obsidian 搜索引擎
+    async searchFilesWithKeywords(keywords, expenseEmoji) {
+        console.log('尝试使用 Obsidian 搜索引擎...');
+        
+        try {
+            // 尝试使用 Obsidian 的搜索引擎
+            const searchResults = await this.useObsidianSearchEngine(keywords, expenseEmoji);
+            if (searchResults.length > 0) {
+                console.log(`Obsidian 搜索引擎找到 ${searchResults.length} 个文件`);
+                return searchResults;
+            }
+        } catch (error) {
+            console.log('Obsidian 搜索引擎不可用:', error);
+        }
+        
+        // 回退到自定义关键词搜索
+        console.log('使用自定义关键词搜索...');
+        return await this.useCustomKeywordSearch(keywords, expenseEmoji);
+    }
+    
+    // 使用 Obsidian 搜索引擎
+    async useObsidianSearchEngine(keywords, expenseEmoji) {
+        const matchingFiles = new Set();
+        
+        // 尝试使用搜索引擎
+        try {
+            // 检查是否有搜索插件
+            const searchPlugin = this.app.internalPlugins?.plugins?.['global-search'];
+            if (searchPlugin && searchPlugin.enabled && searchPlugin.instance) {
+                const searchInstance = searchPlugin.instance;
+                
+                // 为每个关键词执行搜索
+                for (const keyword of keywords) {
+                    const searchTerm = `${expenseEmoji}${keyword}`;
+                    console.log(`搜索关键词: ${searchTerm}`);
+                    
+                    try {
+                        // 执行搜索
+                        const query = `path:${this.config.journalsPath} "${searchTerm}"`;
+                        
+                        // 尝试不同的搜索方法
+                        let results = null;
+                        
+                        // 方法1: 使用搜索引擎的 searchText 方法
+                        if (searchInstance.searchEngine && searchInstance.searchEngine.searchText) {
+                            results = await searchInstance.searchEngine.searchText(searchTerm, {
+                                path: this.config.journalsPath
+                            });
+                        }
+                        
+                        // 方法2: 使用搜索引擎的 search 方法
+                        if (!results && searchInstance.searchEngine && searchInstance.searchEngine.search) {
+                            results = await searchInstance.searchEngine.search(searchTerm);
+                        }
+                        
+                        // 处理搜索结果
+                        if (results && results.length > 0) {
+                            results.forEach(result => {
+                                if (result.file && result.file.path.startsWith(this.config.journalsPath)) {
+                                    matchingFiles.add(result.file);
+                                } else if (result.path && result.path.startsWith(this.config.journalsPath)) {
+                                    const file = this.app.vault.getAbstractFileByPath(result.path);
+                                    if (file) {
+                                        matchingFiles.add(file);
+                                    }
+                                }
+                            });
+                            console.log(`关键词 ${searchTerm} 找到 ${results.length} 个结果`);
+                        }
+                        
+                    } catch (error) {
+                        console.log(`搜索关键词 ${searchTerm} 失败:`, error);
+                    }
+                }
+                
+                if (matchingFiles.size > 0) {
+                    console.log(`搜索引擎总共找到 ${matchingFiles.size} 个文件`);
+                    return Array.from(matchingFiles);
+                }
+            }
+        } catch (error) {
+            console.log('搜索引擎访问失败:', error);
+        }
+        
+        // 搜索引擎未找到结果，返回空数组而不是抛出错误
+        console.log('搜索引擎未找到结果，将使用自定义搜索');
+        return [];
+    }
+    
+    // 自定义关键词搜索实现 - 只扫描日期格式的文件
+    async useCustomKeywordSearch(keywords, expenseEmoji) {
+        const { vault, metadataCache } = this.app;
+        const matchingFiles = new Set();
+        
+        // 获取所有 journals 文件夹下的 markdown 文件
+        const allFiles = vault.getMarkdownFiles().filter(file => 
+            file.path.startsWith(this.config.journalsPath)
+        );
+        
+        // 只保留符合日期格式 yyyy-mm-dd.md 的文件
+        const datePattern = /\d{4}-\d{2}-\d{2}\.md$/;
+        const dateFiles = allFiles.filter(file => datePattern.test(file.name));
+        
+        console.log(`⚠️ 警告: Obsidian 搜索引擎不可用，回退到文件扫描模式`);
+        console.log(`总文件数: ${allFiles.length}，日期格式文件: ${dateFiles.length}`);
+        console.log(`搜索关键词: ${keywords.map(k => expenseEmoji + k).join(', ')}`);
+        
+        // 构建正则表达式 - 只匹配配置的关键词
+        const keywordPattern = keywords.join('|');
+        const searchRegex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s+[\\d.]+`, 'g');
+        
+        // 尝试使用缓存的文件内容（如果可用）
+        let usedCache = 0;
+        let readFromDisk = 0;
+        
+        // 使用并行搜索，但分批处理以避免性能问题
+        const batchSize = 50; // 每批处理50个文件
+        let processedCount = 0;
+        
+        for (let i = 0; i < dateFiles.length; i += batchSize) {
+            const batch = dateFiles.slice(i, i + batchSize);
+            
+            const batchPromises = batch.map(async (file) => {
+                try {
+                    let content = null;
+                    
+                    // 尝试从缓存获取内容
+                    const cachedMetadata = metadataCache.getFileCache(file);
+                    if (cachedMetadata && cachedMetadata.sections) {
+                        // 如果有缓存，尝试快速检查
+                        content = await vault.cachedRead(file);
+                        usedCache++;
+                    } else {
+                        // 从磁盘读取
+                        content = await vault.read(file);
+                        readFromDisk++;
+                    }
+                    
+                    // 使用正则表达式检查是否包含有效的记账记录
+                    if (searchRegex.test(content)) {
+                        return file;
+                    }
+                    return null;
+                } catch (error) {
+                    console.error(`检查文件 ${file.path} 失败:`, error);
+                    return null;
+                }
+            });
+            
+            const batchResults = await Promise.all(batchPromises);
+            const validFiles = batchResults.filter(file => file !== null);
+            validFiles.forEach(file => matchingFiles.add(file));
+            
+            processedCount += batch.length;
+            
+            // 每50个文件显示一次进度
+            if (processedCount % 50 === 0 || processedCount === dateFiles.length) {
+                console.log(`已扫描 ${processedCount}/${dateFiles.length} 个日期文件，找到 ${matchingFiles.size} 个包含记账记录的文件`);
+            }
+        }
+        
+        console.log(`✅ 扫描完成: 共找到 ${matchingFiles.size} 个包含有效记账记录的文件`);
+        console.log(`📊 性能统计: 缓存读取 ${usedCache} 个，磁盘读取 ${readFromDisk} 个`);
+        console.log(`🚀 优化效果: 跳过了 ${allFiles.length - dateFiles.length} 个非日期格式文件`);
+        return Array.from(matchingFiles);
+    }
+    
+    // 优化的遍历方式：预筛选 + 并行处理
+    async getAllRecordsByOptimizedTraversal() {
+        const { vault } = this.app;
+        const { expenseEmoji } = this.config;
+        
+        // 检查文件夹是否存在
+        const journalsFolder = vault.getAbstractFileByPath(this.config.journalsPath);
+        if (!journalsFolder) {
+            new Notice(`未找到 ${this.config.journalsPath} 文件夹`);
+            return [];
+        }
+
+        // 获取所有 journals 文件夹下的 markdown 文件
+        const allFiles = vault.getMarkdownFiles().filter(file => 
+            file.path.startsWith(this.config.journalsPath)
+        );
+        
+        console.log(`开始扫描 ${allFiles.length} 个日记文件...`);
+        
+        // 分批处理文件，避免一次性读取太多文件
+        const batchSize = 10;
+        const records = [];
+        
+        for (let i = 0; i < allFiles.length; i += batchSize) {
+            const batch = allFiles.slice(i, i + batchSize);
+            
+            const batchPromises = batch.map(async (file) => {
+                try {
+                    // 先读取文件的前几行来快速检查是否包含记账标识符
+                    const content = await vault.read(file);
+                    
+                    // 快速检查：如果文件不包含记账标识符，跳过
+                    if (!content.includes(expenseEmoji)) {
+                        return [];
+                    }
+                    
+                    // 解析记账记录
+                    const fileRecords = this.parser.parseFileContent(content, file.path);
+                    if (fileRecords.length > 0) {
+                        console.log(`在 ${file.path} 中找到 ${fileRecords.length} 条记账记录`);
+                    }
+                    
+                    return fileRecords;
+                } catch (error) {
+                    console.error(`读取文件 ${file.path} 失败:`, error);
+                    return [];
+                }
+            });
+            
+            const batchResults = await Promise.all(batchPromises);
+            batchResults.forEach(fileRecords => {
+                records.push(...fileRecords);
+            });
+        }
+        
+        console.log(`总共找到 ${records.length} 条记账记录`);
+        return records.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }
+
+    // 按日期范围筛选记录
+    filterRecordsByDateRange(records, startDate, endDate) {
+        return records.filter(record => {
+            const recordDate = new Date(record.date);
+            return recordDate >= new Date(startDate) && recordDate <= new Date(endDate);
+        });
+    }
+
+    // 统计数据
+    calculateStatistics(records) {
+        const stats = {
+            totalIncome: 0,
+            totalExpense: 0,
+            categoryStats: {},
+            dailyStats: {},
+            budgetStatus: null // 新增预算状态
+        };
+
+        records.forEach(record => {
+            if (record.isIncome) {
+                stats.totalIncome += record.amount;
+            } else {
+                stats.totalExpense += record.amount;
+            }
+
+            // 分类统计
+            if (!stats.categoryStats[record.category]) {
+                stats.categoryStats[record.category] = {
+                    total: 0,
+                    count: 0,
+                    records: []
+                };
+            }
+            stats.categoryStats[record.category].total += record.amount;
+            stats.categoryStats[record.category].count += 1;
+            stats.categoryStats[record.category].records.push(record);
+
+            // 日期统计
+            if (!stats.dailyStats[record.date]) {
+                stats.dailyStats[record.date] = {
+                    income: 0,
+                    expense: 0,
+                    records: []
+                };
+            }
+            if (record.isIncome) {
+                stats.dailyStats[record.date].income += record.amount;
+            } else {
+                stats.dailyStats[record.date].expense += record.amount;
+            }
+            stats.dailyStats[record.date].records.push(record);
+        });
+
+        // 计算预算状态
+        stats.budgetStatus = this.calculateBudgetStatus(stats);
+
+        return stats;
+    }
+    
+    // 计算预算状态
+    calculateBudgetStatus(stats) {
+        const budgets = this.config.budgets;
+        if (!budgets || !budgets.enableAlerts) {
+            return null;
+        }
+        
+        const budgetStatus = {
+            totalBudget: budgets.monthly.total,
+            totalSpent: stats.totalExpense,
+            totalRemaining: budgets.monthly.total - stats.totalExpense,
+            totalProgress: budgets.monthly.total > 0 ? stats.totalExpense / budgets.monthly.total : 0,
+            categories: {},
+            alerts: []
+        };
+        
+        // 检查总预算
+        if (budgetStatus.totalProgress >= budgets.alertThreshold) {
+            const alertType = budgetStatus.totalProgress >= 1 ? 'exceeded' : 'warning';
+            budgetStatus.alerts.push({
+                type: alertType,
+                category: '总预算',
+                message: alertType === 'exceeded' 
+                    ? `总支出已超出预算 ¥${(stats.totalExpense - budgets.monthly.total).toFixed(2)}`
+                    : `总支出已达预算的 ${(budgetStatus.totalProgress * 100).toFixed(0)}%`
+            });
+        }
+        
+        // 检查分类预算
+        Object.entries(budgets.monthly.categories).forEach(([keyword, budget]) => {
+            const categoryName = this.config.categories[keyword];
+            if (!categoryName || budget <= 0) return;
+            
+            const spent = stats.categoryStats[categoryName]?.total || 0;
+            const progress = spent / budget;
+            const remaining = budget - spent;
+            
+            budgetStatus.categories[categoryName] = {
+                budget,
+                spent,
+                remaining,
+                progress,
+                keyword
+            };
+            
+            // 检查是否需要告警
+            if (progress >= budgets.alertThreshold) {
+                const alertType = progress >= 1 ? 'exceeded' : 'warning';
+                budgetStatus.alerts.push({
+                    type: alertType,
+                    category: categoryName,
+                    message: alertType === 'exceeded'
+                        ? `${categoryName}支出已超出预算 ¥${(spent - budget).toFixed(2)}`
+                        : `${categoryName}支出已达预算的 ${(progress * 100).toFixed(0)}%`
+                });
+            }
+        });
+        
+        return budgetStatus;
+    }
+}
+
+// 分类配置模态框
+class CategoryConfigModal extends Modal {
+    constructor(app, plugin) {
+        super(app);
+        this.plugin = plugin;
+        this.appName = plugin.config.appName || '记账软件'; // 应用名称
+        this.categories = { ...plugin.config.categories }; // 复制当前配置
+        this.budgets = plugin.config.budgets ? { ...plugin.config.budgets } : {
+            monthly: { total: 0, categories: {} },
+            enableAlerts: true,
+            alertThreshold: 0.8
+        };
+        this.currentTab = 'basic'; // 当前标签页，默认基础设置
+    }
+
+    onOpen() {
+        // 使用自定义的应用名称作为标题
+        const appName = this.plugin.config.appName || '每日记账';
+        this.titleEl.setText(`${appName}配置`);
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('category-config-modal');
+
+        // 标签页导航
+        this.renderTabs(contentEl);
+        
+        // 内容区域
+        this.contentArea = contentEl.createDiv('config-content');
+        this.renderCurrentTab();
+
+        // 按钮组
+        const buttons = contentEl.createDiv('config-buttons');
+        
+        const cancelBtn = buttons.createEl('button', {
+            text: '取消',
+            cls: 'config-btn config-btn-cancel'
+        });
+        cancelBtn.onclick = () => this.close();
+
+        const saveBtn = buttons.createEl('button', {
+            text: '保存',
+            cls: 'config-btn config-btn-save'
+        });
+        saveBtn.onclick = () => this.saveConfig();
+    }
+
+    renderTabs(container) {
+        const tabsContainer = container.createDiv('config-tabs');
+        
+        const tabs = [
+            { key: 'basic', label: '基础设置' },
+            { key: 'categories', label: '分类管理' },
+            { key: 'budgets', label: '预算设置' }
+        ];
+        
+        tabs.forEach(tab => {
+            const tabBtn = tabsContainer.createEl('button', {
+                text: tab.label,
+                cls: `config-tab ${this.currentTab === tab.key ? 'active' : ''}`
+            });
+            tabBtn.onclick = () => this.switchTab(tab.key);
+        });
+    }
+
+    switchTab(tabKey) {
+        this.currentTab = tabKey;
+        
+        // 更新标签按钮状态
+        document.querySelectorAll('.config-tab').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        const tabIndex = tabKey === 'basic' ? 1 : (tabKey === 'categories' ? 2 : 3);
+        document.querySelector(`.config-tab:nth-child(${tabIndex})`).classList.add('active');
+        
+        this.renderCurrentTab();
+    }
+
+    renderCurrentTab() {
+        this.contentArea.empty();
+        
+        if (this.currentTab === 'basic') {
+            this.renderBasicTab();
+        } else if (this.currentTab === 'categories') {
+            this.renderCategoriesTab();
+        } else {
+            this.renderBudgetsTab();
+        }
+    }
+
+    renderBasicTab() {
+        // 说明文字
+        const description = this.contentArea.createDiv('config-description');
+        description.innerHTML = `
+            <p>自定义应用名称，让记账软件更具个性化</p>
+        `;
+
+        // 应用名称设置
+        const nameSection = this.contentArea.createDiv('config-section');
+        nameSection.createEl('h3', { text: '应用名称' });
+        
+        const nameGroup = nameSection.createDiv('config-input-group');
+        nameGroup.createEl('label', { text: '显示名称：' });
+        const nameInput = nameGroup.createEl('input', {
+            type: 'text',
+            cls: 'config-text-input',
+            value: this.appName,
+            attr: { placeholder: '记账软件', maxlength: '20' }
+        });
+        nameInput.oninput = () => {
+            this.appName = nameInput.value.trim() || '每日记账';
+        };
+
+        // 预览效果
+        const previewSection = this.contentArea.createDiv('config-section');
+        previewSection.createEl('h3', { text: '预览效果' });
+        
+        const previewBox = previewSection.createDiv('config-preview-box');
+        const previewTitle = previewBox.createEl('div', { 
+            cls: 'preview-title'
+        });
+        
+        const updatePreview = () => {
+            previewTitle.textContent = `💰 ${this.appName}`;
+        };
+        
+        updatePreview();
+        nameInput.oninput = () => {
+            this.appName = nameInput.value.trim() || '记账软件';
+            updatePreview();
+        };
+    }
+
+    renderCategoriesTab() {
+        // 说明文字
+        const description = this.contentArea.createDiv('config-description');
+        description.innerHTML = `
+            <p>配置记账关键词和对应的分类名称</p>
+            <p><strong>注意：</strong> <code>sr</code> 关键词表示收入，其他为支出</p>
+        `;
+
+        // 分类列表
+        this.categoryList = this.contentArea.createDiv('category-list');
+        this.renderCategoryList();
+
+        // 添加新分类按钮
+        const addButton = this.contentArea.createEl('button', {
+            text: '+ 添加新分类',
+            cls: 'add-category-btn'
+        });
+        addButton.onclick = () => this.addNewCategory();
+    }
+
+    renderBudgetsTab() {
+        // 说明文字
+        const description = this.contentArea.createDiv('config-description');
+        description.innerHTML = `
+            <p>设置月度预算限额，系统会在接近或超出预算时提醒</p>
+            <p><strong>提示：</strong> 设置为 0 表示不限制该分类预算</p>
+        `;
+
+        // 预算开关
+        const alertSection = this.contentArea.createDiv('budget-section');
+        alertSection.createEl('h3', { text: '预算提醒设置' });
+        
+        const alertToggle = alertSection.createDiv('budget-toggle');
+        const enableCheckbox = alertToggle.createEl('input', { type: 'checkbox' });
+        enableCheckbox.checked = this.budgets.enableAlerts;
+        enableCheckbox.onchange = () => {
+            this.budgets.enableAlerts = enableCheckbox.checked;
+        };
+        alertToggle.createSpan({ text: '启用预算告警' });
+
+        // 告警阈值
+        const thresholdSection = alertSection.createDiv('threshold-section');
+        thresholdSection.createEl('label', { text: '告警阈值 (%)：' });
+        const thresholdInput = thresholdSection.createEl('input', {
+            type: 'number',
+            value: (this.budgets.alertThreshold * 100).toString(),
+            attr: { min: '50', max: '100', step: '5' }
+        });
+        thresholdInput.onchange = () => {
+            this.budgets.alertThreshold = parseInt(thresholdInput.value) / 100;
+        };
+
+        // 总预算
+        const totalSection = this.contentArea.createDiv('budget-section');
+        totalSection.createEl('h3', { text: '月度总预算' });
+        const totalInput = totalSection.createEl('input', {
+            type: 'number',
+            cls: 'budget-input total-budget',
+            value: this.budgets.monthly.total.toString(),
+            attr: { placeholder: '月度总预算', min: '0', step: '100' }
+        });
+        totalInput.onchange = () => {
+            this.budgets.monthly.total = parseFloat(totalInput.value) || 0;
+        };
+
+        // 分类预算
+        const categorySection = this.contentArea.createDiv('budget-section');
+        categorySection.createEl('h3', { text: '分类预算' });
+        
+        this.budgetList = categorySection.createDiv('budget-list');
+        this.renderBudgetList();
+    }
+
+    renderBudgetList() {
+        this.budgetList.empty();
+
+        Object.entries(this.categories).forEach(([keyword, categoryName]) => {
+            if (keyword === 'sr') return; // 跳过收入分类
+            
+            const item = this.budgetList.createDiv('budget-item');
+            
+            const label = item.createDiv('budget-label');
+            label.textContent = `${categoryName} (${keyword})`;
+            
+            const input = item.createEl('input', {
+                type: 'number',
+                cls: 'budget-input',
+                value: (this.budgets.monthly.categories[keyword] || 0).toString(),
+                attr: { placeholder: '预算金额', min: '0', step: '50' }
+            });
+            
+            input.onchange = () => {
+                const value = parseFloat(input.value) || 0;
+                if (value > 0) {
+                    this.budgets.monthly.categories[keyword] = value;
+                } else {
+                    delete this.budgets.monthly.categories[keyword];
+                }
+            };
+        });
+    }
+
+    renderCategoryList() {
+        this.categoryList.empty();
+
+        Object.entries(this.categories).forEach(([keyword, category]) => {
+            const item = this.categoryList.createDiv('category-item');
+            
+            const keywordInput = item.createEl('input', {
+                type: 'text',
+                cls: 'category-keyword',
+                value: keyword,
+                placeholder: '关键词'
+            });
+            keywordInput.maxLength = 10;
+
+            const categoryInput = item.createEl('input', {
+                type: 'text',
+                cls: 'category-name',
+                value: category,
+                placeholder: '分类名称'
+            });
+            categoryInput.maxLength = 20;
+
+            const deleteBtn = item.createEl('button', {
+                text: '删除',
+                cls: 'delete-category-btn'
+            });
+            deleteBtn.onclick = () => this.deleteCategory(keyword);
+
+            // 监听输入变化
+            keywordInput.oninput = () => this.updateCategory(keyword, keywordInput.value, categoryInput.value);
+            categoryInput.oninput = () => this.updateCategory(keyword, keywordInput.value, categoryInput.value);
+        });
+    }
+
+    addNewCategory() {
+        const newKeyword = `new${Date.now()}`;
+        this.categories[newKeyword] = '新分类';
+        this.renderCategoryList();
+    }
+
+    deleteCategory(keyword) {
+        delete this.categories[keyword];
+        // 同时删除对应的预算设置
+        delete this.budgets.monthly.categories[keyword];
+        this.renderCategoryList();
+        if (this.currentTab === 'budgets') {
+            this.renderBudgetList();
+        }
+    }
+
+    updateCategory(oldKeyword, newKeyword, categoryName) {
+        if (oldKeyword !== newKeyword) {
+            delete this.categories[oldKeyword];
+            // 更新预算设置中的关键词
+            if (this.budgets.monthly.categories[oldKeyword]) {
+                this.budgets.monthly.categories[newKeyword] = this.budgets.monthly.categories[oldKeyword];
+                delete this.budgets.monthly.categories[oldKeyword];
+            }
+        }
+        this.categories[newKeyword] = categoryName;
+    }
+
+    async saveConfig() {
+        try {
+            // 验证应用名称
+            const cleanAppName = this.appName.trim();
+            if (!cleanAppName) {
+                new Notice('应用名称不能为空');
+                return;
+            }
+
+            // 验证分类配置
+            const cleanCategories = {};
+            for (const [keyword, category] of Object.entries(this.categories)) {
+                const cleanKeyword = keyword.trim();
+                const cleanCategory = category.trim();
+                
+                if (cleanKeyword && cleanCategory) {
+                    cleanCategories[cleanKeyword] = cleanCategory;
+                }
+            }
+
+            if (Object.keys(cleanCategories).length === 0) {
+                new Notice('至少需要一个分类');
+                return;
+            }
+
+            // 更新配置
+            this.plugin.config.appName = cleanAppName;
+            this.plugin.config.categories = cleanCategories;
+            this.plugin.config.budgets = this.budgets;
+            
+            // 保存到文件
+            const configPath = `${this.plugin.manifest.dir}/config.json`;
+            const adapter = this.app.vault.adapter;
+            const configContent = JSON.stringify(this.plugin.config, null, 4);
+            await adapter.write(configPath, configContent);
+
+            // 清除缓存，重新加载数据
+            this.plugin.storage.clearCache();
+            
+            new Notice('配置已保存，正在刷新...');
+            this.close();
+            
+            // 关闭并重新打开视图以刷新标题
+            const leaves = this.app.workspace.getLeavesOfType(ACCOUNTING_VIEW);
+            for (const leaf of leaves) {
+                // 先分离视图
+                await leaf.setViewState({ type: 'empty' });
+            }
+            
+            // 等待一小段时间后重新打开
+            setTimeout(async () => {
+                await this.plugin.activateView();
+                new Notice('配置已保存并刷新');
+            }, 100);
+        } catch (error) {
+            console.error('保存配置失败:', error);
+            new Notice('保存配置失败');
+        }
+    }
+}
+class DateRangeModal extends Modal {
+    constructor(app, options) {
+        super(app);
+        this.options = options;
+    }
+
+    onOpen() {
+        this.titleEl.setText('选择查询时间范围');
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('date-range-modal');
+
+        // 开始日期
+        const startGroup = contentEl.createDiv('date-group');
+        startGroup.createEl('label', { text: '开始日期:' });
+        this.startInput = startGroup.createEl('input', {
+            type: 'date',
+            cls: 'date-input'
+        });
+        
+        // 结束日期
+        const endGroup = contentEl.createDiv('date-group');
+        endGroup.createEl('label', { text: '结束日期:' });
+        this.endInput = endGroup.createEl('input', {
+            type: 'date',
+            cls: 'date-input'
+        });
+
+        // 设置默认值
+        const today = new Date();
+        const lastMonth = new Date(today);
+        lastMonth.setMonth(lastMonth.getMonth() - 1);
+        
+        this.startInput.value = this.formatDate(lastMonth);
+        this.endInput.value = this.formatDate(today);
+
+        // 按钮
+        const buttons = contentEl.createDiv('date-buttons');
+        
+        const cancelBtn = buttons.createEl('button', {
+            text: '取消',
+            cls: 'date-btn date-btn-cancel'
+        });
+        cancelBtn.onclick = () => this.close();
+
+        const confirmBtn = buttons.createEl('button', {
+            text: '确定',
+            cls: 'date-btn date-btn-confirm'
+        });
+        confirmBtn.onclick = () => {
+            const startDate = this.startInput.value;
+            const endDate = this.endInput.value;
+            
+            if (startDate && endDate) {
+                this.options.onSelect(startDate, endDate);
+                this.close();
+            } else {
+                new Notice('请选择完整的日期范围');
+            }
+        };
+    }
+
+    formatDate(date) {
+        return date.toISOString().split('T')[0];
+    }
+}
+
+// 记账视图
+const ACCOUNTING_VIEW = 'accounting-view';
+
+class AccountingView extends ItemView {
+    constructor(leaf, plugin) {
+        super(leaf);
+        this.plugin = plugin;
+        this.currentRecords = [];
+        this.currentStats = null;
+    }
+
+    getViewType() {
+        return ACCOUNTING_VIEW;
+    }
+
+    getDisplayText() {
+        return this.plugin.config.appName || '每日记账';
+    }
+
+    getIcon() {
+        return 'calculator';
+    }
+
+    async onOpen() {
+        await this.render();
+    }
+
+    async onClose() {
+        // 清理资源
+    }
+
+    async render() {
+        const container = this.containerEl.children[1];
+        container.empty();
+        container.addClass('accounting-view');
+
+        this.renderHeader(container);
+        this.renderFilters(container);
+        this.renderStats(container);
+        this.renderRecordsList(container);
+        
+        // 初始加载数据
+        await this.loadAllRecords();
+    }
+
+    renderHeader(container) {
+        const header = container.createDiv('accounting-header');
+        
+        // 使用配置的应用名称
+        const appName = this.plugin.config.appName || '每日记账';
+        header.createEl('h2', { text: `💰 ${appName}`, cls: 'accounting-title' });
+        
+        const actions = header.createDiv('accounting-actions');
+        
+        const refreshBtn = actions.createEl('button', {
+            text: '刷新数据',
+            cls: 'accounting-btn'
+        });
+        refreshBtn.onclick = () => this.loadAllRecords(true); // 强制刷新
+
+        const configBtn = actions.createEl('button', {
+            text: '配置分类',
+            cls: 'accounting-btn'
+        });
+        configBtn.onclick = () => this.showConfigModal();
+    }
+
+    renderFilters(container) {
+        const filters = container.createDiv('accounting-filters');
+        
+        // 时间筛选区域
+        const timeSection = filters.createDiv('filter-section');
+        timeSection.createEl('label', { text: '时间筛选:', cls: 'filter-label' });
+        
+        // 快速时间按钮组
+        const quickButtons = timeSection.createDiv('quick-time-buttons');
+        
+        const timeRanges = [
+            { label: '本周', key: 'thisWeek' },
+            { label: '上周', key: 'lastWeek' },
+            { label: '本月', key: 'thisMonth' },
+            { label: '上月', key: 'lastMonth' },
+            { label: '自定义', key: 'custom' }
+        ];
+        
+        timeRanges.forEach(range => {
+            const btn = quickButtons.createEl('button', {
+                text: range.label,
+                cls: 'quick-time-btn'
+            });
+            btn.setAttribute('data-range', range.key);
+            btn.onclick = () => this.applyTimeRange(range.key, btn);
+        });
+        
+        // 当前时间范围显示
+        this.timeDisplay = timeSection.createDiv('current-time-display');
+        this.timeDisplay.style.display = 'none';
+        
+        // 清除筛选按钮
+        const clearBtn = timeSection.createEl('button', {
+            text: '重置为本月',
+            cls: 'clear-filter-btn'
+        });
+        clearBtn.onclick = () => this.resetToThisMonth();
+    }
+    
+    // 应用时间范围筛选
+    applyTimeRange(rangeKey, buttonEl) {
+        const now = new Date();
+        let startDate, endDate, displayText;
+        
+        switch (rangeKey) {
+            case 'thisWeek':
+                startDate = this.getWeekStart(now);
+                endDate = this.getWeekEnd(now);
+                displayText = '本周';
+                break;
+                
+            case 'lastWeek':
+                const lastWeek = new Date(now);
+                lastWeek.setDate(lastWeek.getDate() - 7);
+                startDate = this.getWeekStart(lastWeek);
+                endDate = this.getWeekEnd(lastWeek);
+                displayText = '上周';
+                break;
+                
+            case 'thisMonth':
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                displayText = '本月';
+                break;
+                
+            case 'lastMonth':
+                startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+                displayText = '上月';
+                break;
+                
+            case 'custom':
+                this.showDateRangePicker();
+                return;
+        }
+        
+        // 格式化日期
+        const startStr = this.formatDate(startDate);
+        const endStr = this.formatDate(endDate);
+        
+        // 应用筛选
+        const filteredRecords = this.plugin.storage.filterRecordsByDateRange(
+            this.currentRecords, startStr, endStr
+        );
+        this.currentStats = this.plugin.storage.calculateStatistics(filteredRecords);
+        
+        // 更新显示
+        this.timeDisplay.textContent = `${displayText} (${startStr} 至 ${endStr})`;
+        this.timeDisplay.style.display = 'block';
+        
+        // 更新按钮状态
+        document.querySelectorAll('.quick-time-btn').forEach(btn => btn.classList.remove('active'));
+        buttonEl.classList.add('active');
+        
+        this.updateStatsDisplay();
+        this.updateRecordsDisplay(filteredRecords);
+    }
+    
+    // 重置为本月
+    resetToThisMonth() {
+        // 清除所有按钮状态
+        document.querySelectorAll('.quick-time-btn').forEach(btn => btn.classList.remove('active'));
+        
+        // 应用本月筛选
+        const thisMonthBtn = document.querySelector('.quick-time-btn[data-range="thisMonth"]');
+        if (thisMonthBtn) {
+            this.applyTimeRange('thisMonth', thisMonthBtn);
+        } else {
+            // 如果找不到按钮，直接应用本月筛选
+            this.applyDefaultTimeRange();
+        }
+    }
+    
+    // 清除时间筛选（显示全部数据）
+    clearTimeFilter() {
+        this.currentStats = this.plugin.storage.calculateStatistics(this.currentRecords);
+        this.timeDisplay.style.display = 'none';
+        
+        // 清除按钮状态
+        document.querySelectorAll('.quick-time-btn').forEach(btn => btn.classList.remove('active'));
+        
+        this.updateStatsDisplay();
+        this.updateRecordsDisplay();
+    }
+    
+    // 获取周开始日期（周一）
+    getWeekStart(date) {
+        const d = new Date(date);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1); // 周一为一周开始
+        return new Date(d.setDate(diff));
+    }
+    
+    // 获取周结束日期（周日）
+    getWeekEnd(date) {
+        const d = new Date(date);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? 0 : 7); // 周日为一周结束
+        return new Date(d.setDate(diff));
+    }
+    
+    // 格式化日期为 YYYY-MM-DD
+    formatDate(date) {
+        return date.toISOString().split('T')[0];
+    }
+
+    renderStats(container) {
+        this.statsContainer = container.createDiv('accounting-stats');
+        this.updateStatsDisplay();
+    }
+
+    renderRecordsList(container) {
+        this.recordsContainer = container.createDiv('accounting-records');
+        this.updateRecordsDisplay();
+    }
+
+    async loadAllRecords(forceRefresh = false) {
+        try {
+            // 显示加载状态
+            if (forceRefresh) {
+                new Notice('正在强制刷新记账数据...');
+            }
+            
+            this.currentRecords = await this.plugin.storage.getAllRecords(forceRefresh);
+            this.currentStats = this.plugin.storage.calculateStatistics(this.currentRecords);
+            
+            // 默认显示本月数据
+            this.applyDefaultTimeRange();
+            
+            const message = forceRefresh 
+                ? `已强制刷新并加载 ${this.currentRecords.length} 条记账记录`
+                : `已加载 ${this.currentRecords.length} 条记账记录`;
+            new Notice(message);
+        } catch (error) {
+            console.error('加载记账记录失败:', error);
+            new Notice('加载记账记录失败');
+        }
+    }
+    
+    // 应用默认时间范围（本月）
+    applyDefaultTimeRange() {
+        const now = new Date();
+        const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        
+        const startStr = this.formatDate(startDate);
+        const endStr = this.formatDate(endDate);
+        
+        // 筛选本月数据
+        const filteredRecords = this.plugin.storage.filterRecordsByDateRange(
+            this.currentRecords, startStr, endStr
+        );
+        this.currentStats = this.plugin.storage.calculateStatistics(filteredRecords);
+        
+        // 更新显示
+        this.timeDisplay.textContent = `本月 (${startStr} 至 ${endStr})`;
+        this.timeDisplay.style.display = 'block';
+        
+        // 设置本月按钮为激活状态
+        setTimeout(() => {
+            const thisMonthBtn = document.querySelector('.quick-time-btn[data-range="thisMonth"]');
+            if (thisMonthBtn) {
+                thisMonthBtn.classList.add('active');
+            }
+        }, 100);
+        
+        this.updateStatsDisplay();
+        this.updateRecordsDisplay(filteredRecords);
+    }
+
+    showDateRangePicker() {
+        new DateRangeModal(this.app, {
+            onSelect: (startDate, endDate) => {
+                const filteredRecords = this.plugin.storage.filterRecordsByDateRange(
+                    this.currentRecords, startDate, endDate
+                );
+                this.currentStats = this.plugin.storage.calculateStatistics(filteredRecords);
+                
+                this.dateDisplay.textContent = `${startDate} 至 ${endDate}`;
+                this.dateDisplay.style.display = 'block';
+                
+                this.updateStatsDisplay();
+                this.updateRecordsDisplay(filteredRecords);
+            }
+        }).open();
+    }
+
+    // 获取分类颜色
+    getCategoryColor(category) {
+        const colors = {
+            '餐饮': '#dc3545',    // 红色
+            '交通': '#007bff',    // 蓝色
+            '娱乐': '#6f42c1',    // 紫色
+            '购物': '#fd7e14',    // 橙色
+            '医疗': '#20c997',    // 青色
+            '教育': '#198754',    // 绿色
+            '房租': '#6c757d',    // 灰色
+            '其他': '#495057',    // 深灰色
+            '收入': '#28a745',    // 成功绿色
+            '投资': '#17a2b8',    // 信息蓝色
+            '礼物': '#e83e8c',    // 粉色
+            '旅游': '#ffc107',    // 警告黄色
+            '运动': '#fd7e14'     // 橙色
+        };
+        return colors[category] || '#6c757d'; // 默认灰色
+    }
+
+    updateStatsDisplay() {
+        if (!this.statsContainer) return;
+        
+        this.statsContainer.empty();
+        
+        if (!this.currentStats) {
+            this.statsContainer.createDiv({ text: '暂无数据', cls: 'no-data' });
+            return;
+        }
+
+        const { totalIncome, totalExpense, categoryStats, budgetStatus } = this.currentStats;
+        const balance = totalIncome - totalExpense;
+
+        // 预算告警（如果有）
+        if (budgetStatus && budgetStatus.alerts.length > 0) {
+            this.renderBudgetAlerts(budgetStatus.alerts);
+        }
+
+        // 总览统计
+        const overview = this.statsContainer.createDiv('stats-overview');
+        
+        const incomeCard = overview.createDiv('stat-card income');
+        incomeCard.createDiv({ text: '总收入', cls: 'stat-label' });
+        incomeCard.createDiv({ text: `¥${totalIncome.toFixed(2)}`, cls: 'stat-value' });
+
+        const expenseCard = overview.createDiv('stat-card expense');
+        expenseCard.createDiv({ text: '总支出', cls: 'stat-label' });
+        expenseCard.createDiv({ text: `¥${totalExpense.toFixed(2)}`, cls: 'stat-value' });
+
+        const balanceCard = overview.createDiv(`stat-card balance ${balance >= 0 ? 'positive' : 'negative'}`);
+        balanceCard.createDiv({ text: '结余', cls: 'stat-label' });
+        balanceCard.createDiv({ text: `¥${balance.toFixed(2)}`, cls: 'stat-value' });
+
+        // 预算状态卡片
+        if (budgetStatus && budgetStatus.totalBudget > 0) {
+            const budgetCard = overview.createDiv('stat-card budget');
+            budgetCard.createDiv({ text: '预算状态', cls: 'stat-label' });
+            const remaining = budgetStatus.totalRemaining;
+            const progressPercent = (budgetStatus.totalProgress * 100).toFixed(0);
+            budgetCard.createDiv({ 
+                text: remaining >= 0 ? `剩余 ¥${remaining.toFixed(2)}` : `超支 ¥${Math.abs(remaining).toFixed(2)}`,
+                cls: `stat-value ${remaining >= 0 ? 'positive' : 'negative'}`
+            });
+            budgetCard.createDiv({ text: `已用 ${progressPercent}%`, cls: 'stat-progress' });
+        }
+
+        // 分类统计
+        if (Object.keys(categoryStats).length > 0) {
+            const categorySection = this.statsContainer.createDiv('category-stats');
+            categorySection.createEl('h3', { text: '分类统计' });
+            
+            const categoryList = categorySection.createDiv('category-list');
+            
+            Object.entries(categoryStats)
+                .sort(([,a], [,b]) => b.total - a.total)
+                .forEach(([category, data]) => {
+                    const item = categoryList.createDiv('category-item');
+                    
+                    const info = item.createDiv('category-info');
+                    
+                    // 创建彩色标签
+                    const categoryLabel = info.createDiv('category-label');
+                    const color = this.getCategoryColor(category);
+                    categoryLabel.style.backgroundColor = color;
+                    categoryLabel.style.color = '#ffffff';
+                    categoryLabel.textContent = category;
+                    
+                    const amountInfo = info.createDiv('category-amount-info');
+                    amountInfo.createDiv({ text: `¥${data.total.toFixed(2)}`, cls: 'category-amount' });
+                    amountInfo.createDiv({ text: `${data.count}笔`, cls: 'category-count' });
+                    
+                    // 预算进度条（如果有预算设置）
+                    if (budgetStatus && budgetStatus.categories[category]) {
+                        const budgetInfo = budgetStatus.categories[category];
+                        const progressBar = item.createDiv('budget-progress');
+                        const progressFill = progressBar.createDiv('budget-progress-fill');
+                        const progressPercent = Math.min(budgetInfo.progress * 100, 100);
+                        progressFill.style.width = `${progressPercent}%`;
+                        
+                        // 根据进度设置颜色
+                        if (budgetInfo.progress >= 1) {
+                            progressFill.classList.add('exceeded');
+                        } else if (budgetInfo.progress >= 0.8) {
+                            progressFill.classList.add('warning');
+                        } else {
+                            progressFill.classList.add('normal');
+                        }
+                        
+                        const budgetText = item.createDiv('budget-text');
+                        budgetText.textContent = `预算: ¥${budgetInfo.budget} | 剩余: ¥${budgetInfo.remaining.toFixed(2)}`;
+                    }
+                });
+        }
+    }
+    
+    // 渲染预算告警
+    renderBudgetAlerts(alerts) {
+        const alertsContainer = this.statsContainer.createDiv('budget-alerts');
+        
+        alerts.forEach(alert => {
+            const alertItem = alertsContainer.createDiv(`budget-alert ${alert.type}`);
+            const icon = alert.type === 'exceeded' ? '⚠️' : '⚡';
+            alertItem.innerHTML = `${icon} ${alert.message}`;
+        });
+    }
+
+    updateRecordsDisplay(records = this.currentRecords) {
+        if (!this.recordsContainer) return;
+        
+        this.recordsContainer.empty();
+        
+        if (!records || records.length === 0) {
+            this.recordsContainer.createDiv({ text: '暂无记账记录', cls: 'no-records' });
+            return;
+        }
+
+        const recordsList = this.recordsContainer.createDiv('records-list');
+        recordsList.createEl('h3', { text: `记账记录 (${records.length}条)` });
+
+        // 按日期分组
+        const groupedRecords = this.groupRecordsByDate(records);
+        
+        Object.entries(groupedRecords)
+            .sort(([a], [b]) => new Date(b) - new Date(a))
+            .forEach(([date, dayRecords]) => {
+                this.renderDayRecords(recordsList, date, dayRecords);
+            });
+    }
+
+    groupRecordsByDate(records) {
+        const grouped = {};
+        records.forEach(record => {
+            if (!grouped[record.date]) {
+                grouped[record.date] = [];
+            }
+            grouped[record.date].push(record);
+        });
+        return grouped;
+    }
+
+    // 获取分类颜色
+    getCategoryColor(category) {
+        const colors = {
+            '餐饮': '#dc3545',    // 红色
+            '交通': '#007bff',    // 蓝色
+            '娱乐': '#6f42c1',    // 紫色
+            '购物': '#fd7e14',    // 橙色
+            '医疗': '#20c997',    // 青色
+            '教育': '#198754',    // 绿色
+            '房租': '#6c757d',    // 灰色
+            '其他': '#495057',    // 深灰色
+            '收入': '#28a745',    // 成功绿色
+            '投资': '#17a2b8',    // 信息蓝色
+            '礼物': '#e83e8c',    // 粉色
+            '旅游': '#ffc107',    // 警告黄色
+            '运动': '#fd7e14'     // 橙色
+        };
+        return colors[category] || '#6c757d'; // 默认灰色
+    }
+
+    renderDayRecords(container, date, records) {
+        const dayGroup = container.createDiv('day-group');
+        
+        const dayHeader = dayGroup.createDiv('day-header');
+        const dayTotal = records.reduce((sum, r) => sum + (r.isIncome ? r.amount : -r.amount), 0);
+        
+        const dateSpan = dayHeader.createSpan({ text: this.formatDateDisplay(date), cls: 'day-date clickable' });
+        
+        // 添加点击事件，打开对应日期的日记
+        dateSpan.onclick = async () => {
+            await this.openJournalFile(date);
+        };
+        
+        dayHeader.createSpan({ 
+            text: `¥${dayTotal.toFixed(2)}`, 
+            cls: `day-total ${dayTotal >= 0 ? 'positive' : 'negative'}`
+        });
+
+        const recordsList = dayGroup.createDiv('day-records');
+        
+        records.forEach(record => {
+            const recordItem = recordsList.createDiv('record-item');
+            
+            // 如果是补录记录，添加标记
+            if (record.isBackfill) {
+                recordItem.classList.add('backfill');
+                recordItem.title = `补录记录 (原记录于 ${record.fileDate})`;
+            }
+            
+            const recordInfo = recordItem.createDiv('record-info');
+            
+            // 创建彩色分类标签
+            const categoryLabel = recordInfo.createDiv('record-category-label');
+            const color = this.getCategoryColor(record.category);
+            categoryLabel.style.backgroundColor = color;
+            categoryLabel.style.color = '#ffffff';
+            categoryLabel.textContent = record.category;
+            
+            // 显示描述，如果是补录则高亮日期
+            let description = record.description;
+            if (record.isBackfill) {
+                const dateRegex = /(\d{4}-\d{2}-\d{2})/;
+                description = description.replace(dateRegex, '<strong>$1</strong>');
+            }
+            
+            const descDiv = recordInfo.createDiv({ cls: 'record-description' });
+            descDiv.innerHTML = description;
+            
+            const recordAmount = recordItem.createDiv('record-amount');
+            const amountText = record.isIncome ? `+¥${record.amount}` : `-¥${record.amount}`;
+            recordAmount.createDiv({ 
+                text: amountText, 
+                cls: `amount ${record.isIncome ? 'income' : 'expense'}`
+            });
+            
+            // 右键菜单
+            recordItem.oncontextmenu = (e) => {
+                e.preventDefault();
+                this.showRecordContextMenu(e, record);
+            };
+        });
+    }
+
+    showRecordContextMenu(event, record) {
+        const menu = new Menu();
+        
+        menu.addItem(item => {
+            item.setTitle('查看原文')
+                .setIcon('file-text')
+                .onClick(() => {
+                    this.openJournalFile(record.date);
+                });
+        });
+
+        menu.showAtMouseEvent(event);
+    }
+
+    async openJournalFile(date) {
+        const fileName = `${date}.md`;
+        const filePath = `${this.plugin.config.journalsPath}/${fileName}`;
+        
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (file instanceof TFile) {
+            const leaf = this.app.workspace.getLeaf();
+            await leaf.openFile(file);
+        } else {
+            new Notice(`未找到日记文件: ${filePath}`);
+        }
+    }
+
+    formatDateDisplay(dateStr) {
+        const date = new Date(dateStr);
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        if (dateStr === today.toISOString().split('T')[0]) {
+            return '今天';
+        } else if (dateStr === yesterday.toISOString().split('T')[0]) {
+            return '昨天';
+        } else {
+            return date.toLocaleDateString('zh-CN', { 
+                month: 'long', 
+                day: 'numeric',
+                weekday: 'short'
+            });
+        }
+    }
+
+    showConfigModal() {
+        new CategoryConfigModal(this.app, this.plugin).open();
+    }
+}
+
+// 主插件类
+class AccountingPlugin extends Plugin {
+    async onload() {
+        console.log('加载记账管理插件');
+
+        // 加载配置
+        await this.loadConfig();
+        
+        // 初始化存储管理器
+        this.storage = new AccountingStorage(this.app, this.config);
+
+        // 注册视图
+        this.registerView(ACCOUNTING_VIEW, (leaf) => new AccountingView(leaf, this));
+
+        // 添加功能区图标
+        const appName = this.config.appName || '每日记账';
+        this.addRibbonIcon('calculator', appName, () => {
+            this.activateView();
+        });
+
+        // 添加命令
+        this.addCommand({
+            id: 'open-accounting',
+            name: `打开${appName}`,
+            callback: () => this.activateView()
+        });
+
+        this.addCommand({
+            id: 'refresh-accounting',
+            name: '刷新记账数据',
+            callback: () => this.refreshData()
+        });
+    }
+
+    async onunload() {
+        console.log('卸载记账管理插件');
+        this.app.workspace.detachLeavesOfType(ACCOUNTING_VIEW);
+    }
+
+    async loadConfig() {
+        try {
+            const configPath = `${this.manifest.dir}/config.json`;
+            const adapter = this.app.vault.adapter;
+            
+            if (await adapter.exists(configPath)) {
+                const configContent = await adapter.read(configPath);
+                this.config = JSON.parse(configContent);
+                console.log('配置加载成功:', this.config);
+            } else {
+                console.log('配置文件不存在，使用默认配置');
+                this.config = this.getDefaultConfig();
+            }
+        } catch (error) {
+            console.error('加载配置失败:', error);
+            this.config = this.getDefaultConfig();
+        }
+    }
+
+    getDefaultConfig() {
+        return {
+            appName: "每日记账",
+            categories: {
+                "cy": "餐饮",
+                "gw": "购物",
+                "dk": "贷款",
+                "jf": "生活缴费",
+                "qt": "其他"
+            },
+            expenseEmoji: "#",
+            journalsPath: "journals"
+        };
+    }
+
+    async activateView() {
+        const { workspace } = this.app;
+        
+        // 检查是否已经有打开的视图
+        let leaf = workspace.getLeavesOfType(ACCOUNTING_VIEW)[0];
+        
+        if (!leaf) {
+            // 创建新的标签页
+            leaf = workspace.getLeaf('tab');
+            await leaf.setViewState({
+                type: ACCOUNTING_VIEW,
+                active: true
+            });
+        }
+        
+        // 激活视图
+        workspace.setActiveLeaf(leaf, { focus: true });
+        
+        // 强制刷新数据
+        if (leaf.view instanceof AccountingView) {
+            await leaf.view.loadAllRecords(true);
+        }
+    }
+
+    async refreshData() {
+        const leaves = this.app.workspace.getLeavesOfType(ACCOUNTING_VIEW);
+        for (const leaf of leaves) {
+            if (leaf.view instanceof AccountingView) {
+                await leaf.view.loadAllRecords();
+            }
+        }
+    }
+}
+
+module.exports = AccountingPlugin;
+ No newline at end of file
