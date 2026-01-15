@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
+import { copyFileSync, existsSync } from 'fs';
 
 const banner =
 `/*
@@ -15,7 +16,7 @@ const context = await esbuild.context({
 	banner: {
 		js: banner,
 	},
-	entryPoints: ['main.js'],
+	entryPoints: ['main.ts'],
 	bundle: true,
 	external: [
 		'obsidian',
@@ -42,6 +43,21 @@ const context = await esbuild.context({
 
 if (prod) {
 	await context.rebuild();
+	
+	// 复制其他文件到 dist
+	if (existsSync('manifest.json')) {
+		copyFileSync('manifest.json', 'dist/manifest.json');
+		console.log('✅ 已复制 manifest.json → dist/manifest.json');
+	}
+	if (existsSync('styles.css')) {
+		copyFileSync('styles.css', 'dist/styles.css');
+		console.log('✅ 已复制 styles.css → dist/styles.css');
+	}
+	if (existsSync('config.json')) {
+		copyFileSync('config.json', 'dist/config.json');
+		console.log('✅ 已复制 config.json → dist/config.json');
+	}
+	
 	process.exit(0);
 } else {
 	await context.watch();

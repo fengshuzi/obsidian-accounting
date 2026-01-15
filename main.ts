@@ -1,4 +1,12 @@
-const { Plugin, ItemView, Modal, Notice, Menu, TFile } = require('obsidian');
+import { Plugin, ItemView, Modal, Notice, Menu, TFile } from 'obsidian';
+
+// 辅助函数：格式化本地日期为 YYYY-MM-DD（避免 UTC 时区问题）
+function formatLocalDate(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
 
 // 记账记录解析器
 class AccountingParser {
@@ -896,7 +904,6 @@ class CategoryConfigModal extends Modal {
             // 清除缓存，重新加载数据
             this.plugin.storage.clearCache();
             
-            new Notice('配置已保存，正在刷新...');
             this.close();
             
             // 关闭并重新打开视图以刷新标题
@@ -909,7 +916,6 @@ class CategoryConfigModal extends Modal {
             // 等待一小段时间后重新打开
             setTimeout(async () => {
                 await this.plugin.activateView();
-                new Notice('配置已保存并刷新');
             }, 100);
         } catch (error) {
             console.error('保存配置失败:', error);
@@ -1209,21 +1215,11 @@ class AccountingView extends ItemView {
 
     async loadAllRecords(forceRefresh = false) {
         try {
-            // 显示加载状态
-            if (forceRefresh) {
-                new Notice('正在强制刷新记账数据...');
-            }
-            
             this.currentRecords = await this.plugin.storage.getAllRecords(forceRefresh);
             this.currentStats = this.plugin.storage.calculateStatistics(this.currentRecords);
             
             // 默认显示本月数据
             this.applyDefaultTimeRange();
-            
-            const message = forceRefresh 
-                ? `已强制刷新并加载 ${this.currentRecords.length} 条记账记录`
-                : `已加载 ${this.currentRecords.length} 条记账记录`;
-            new Notice(message);
         } catch (error) {
             console.error('加载记账记录失败:', error);
             new Notice('加载记账记录失败');
@@ -1581,7 +1577,7 @@ class AccountingView extends ItemView {
 }
 
 // 主插件类
-class AccountingPlugin extends Plugin {
+export default class AccountingPlugin extends Plugin {
     async onload() {
         console.log('加载记账管理插件');
 
@@ -1686,5 +1682,3 @@ class AccountingPlugin extends Plugin {
         }
     }
 }
-
-module.exports = AccountingPlugin;

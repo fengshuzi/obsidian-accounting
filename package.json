@@ -5,9 +5,9 @@
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production && cp manifest.json styles.css config.json dist/",
+    "build": "node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json",
-    "deploy": "node deploy.mjs",
+    "deploy": "npm run build && node deploy.mjs",
     "release": "node release.mjs"
   },
   "keywords": [
