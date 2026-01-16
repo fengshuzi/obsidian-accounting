@@ -1116,7 +1116,6 @@ class QuickEntryModal extends Modal {
     amount: string;
     description: string;
     amountInput: HTMLInputElement;
-    descInput: HTMLInputElement;
     
     constructor(app: any, plugin: any, onSave: () => Promise<void>) {
         super(app);
@@ -1140,6 +1139,9 @@ class QuickEntryModal extends Modal {
         
         const categoryGrid = categorySection.createDiv('category-grid');
         
+        // 获取默认分类
+        const defaultCategory = this.plugin.config.defaultCategory || 'cy';
+        
         // 创建分类按钮
         Object.entries(this.plugin.config.categories).forEach(([keyword, categoryName]) => {
             const isIncome = keyword === 'sr';
@@ -1149,50 +1151,53 @@ class QuickEntryModal extends Modal {
             });
             btn.setAttribute('data-keyword', keyword);
             btn.onclick = () => this.selectCategory(keyword, btn);
+            
+            // 自动选中默认分类
+            if (keyword === defaultCategory) {
+                btn.classList.add('selected');
+                this.selectedCategory = keyword;
+            }
         });
 
-        // 金额输入
+        // 金额和备注输入（合并为一个输入框）
         const amountSection = contentEl.createDiv('entry-section');
-        amountSection.createEl('label', { text: '金额', cls: 'entry-label' });
+        const label = amountSection.createEl('label', { text: '金额和备注', cls: 'entry-label' });
+        
+        // 根据设备类型显示不同提示
+        const isMobile = window.innerWidth <= 600;
+        const hintText = isMobile 
+            ? '（格式：50 午餐，回车保存）'
+            : '（格式：金额 备注，如：50 午餐）';
+        
+        label.createEl('span', { 
+            text: hintText,
+            cls: 'entry-hint'
+        });
         
         this.amountInput = amountSection.createEl('input', {
-            type: 'number',
-            cls: 'entry-input',
-            attr: { 
-                placeholder: '请输入金额',
-                min: '0',
-                step: '0.01'
-            }
-        });
-        this.amountInput.focus();
-
-        // 描述输入
-        const descSection = contentEl.createDiv('entry-section');
-        descSection.createEl('label', { text: '备注（可选）', cls: 'entry-label' });
-        
-        this.descInput = descSection.createEl('input', {
             type: 'text',
-            cls: 'entry-input',
+            cls: 'entry-input entry-input-combined',
             attr: { 
-                placeholder: '添加备注信息',
-                maxlength: '100'
+                placeholder: '例如：50 午餐 或 50',
+                maxlength: '100',
+                inputmode: 'text' // 优化移动端输入法
             }
         });
 
-        // 按钮组
+        // 按钮组（放在输入框后面，但在移动端会通过CSS调整顺序）
         const buttons = contentEl.createDiv('entry-buttons');
+        
+        const saveBtn = buttons.createEl('button', {
+            text: '保存',
+            cls: 'entry-btn entry-btn-save'
+        });
+        saveBtn.onclick = () => this.saveEntry();
         
         const cancelBtn = buttons.createEl('button', {
             text: '取消',
             cls: 'entry-btn entry-btn-cancel'
         });
         cancelBtn.onclick = () => this.close();
-
-        const saveBtn = buttons.createEl('button', {
-            text: '保存',
-            cls: 'entry-btn entry-btn-save'
-        });
-        saveBtn.onclick = () => this.saveEntry();
 
         // 回车保存
         this.amountInput.addEventListener('keypress', (e) => {
@@ -1201,11 +1206,10 @@ class QuickEntryModal extends Modal {
             }
         });
         
-        this.descInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.saveEntry();
-            }
-        });
+        // 延迟聚焦，避免立即弹出输入法
+        setTimeout(() => {
+            this.amountInput.focus();
+        }, 100);
     }
 
     selectCategory(keyword: string, buttonEl: HTMLElement) {
@@ -1226,13 +1230,27 @@ class QuickEntryModal extends Modal {
             return;
         }
 
-        const amount = parseFloat(this.amountInput.value);
+        // 解析输入：支持 "金额 备注" 或 "金额" 格式
+        const input = this.amountInput.value.trim();
+        if (!input) {
+            new Notice('请输入金额');
+            return;
+        }
+
+        // 使用正则表达式解析：数字（可能带小数点）+ 可选的空格和备注
+        const match = input.match(/^([\d.]+)\s*(.*)$/);
+        if (!match) {
+            new Notice('请输入有效的金额格式，例如：50 午餐');
+            return;
+        }
+
+        const amount = parseFloat(match[1]);
+        const description = match[2].trim();
+
         if (!amount || amount <= 0) {
             new Notice('请输入有效金额');
             return;
         }
-
-        const description = this.descInput.value.trim();
 
         try {
             // 获取今天的日记文件路径
@@ -1929,6 +1947,13 @@ export default class AccountingPlugin extends Plugin {
             name: '刷新记账数据',
             callback: () => this.refreshData()
         });
+
+        this.addCommand({
+            id: 'quick-entry',
+            name: '快速记账',
+            icon: 'wallet',
+            callback: () => this.openQuickEntry()
+        });
     }
 
     async onunload() {
@@ -2002,5 +2027,13 @@ export default class AccountingPlugin extends Plugin {
                 await leaf.view.loadAllRecords();
             }
         }
+    }
+
+    openQuickEntry() {
+        // 打开快速记账模态框
+        new QuickEntryModal(this.app, this, async () => {
+            // 保存后的回调：刷新所有打开的记账视图
+            await this.refreshData();
+        }).open();
     }
 }
