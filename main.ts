@@ -93,15 +93,20 @@ class AccountingParser {
         const keywords = Object.keys(categories).sort((a, b) => b.length - a.length);
         const keywordPattern = keywords.join('|');
         
-        // 提取记账信息 - 只匹配配置中定义的关键词
-        const regex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s+([\\d.]+)\\s*(.*)`, 'g');
+        // 提取记账信息 - 支持有空格或无空格的格式
+        // 匹配格式：#cy 50 描述 或 #cy50描述 或 #cy全家早餐100元买了3个鸡蛋
+        // 使用非贪婪匹配 .*? 找到第一个数字作为金额
+        const regex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s*(.*?)([\\d.]+)(.*)`, 'g');
         const match = regex.exec(line);
         
         if (!match) return null;
 
-        const [, keyword, amount, description] = match;
+        const [, keyword, prefix, amount, suffix] = match;
         const category = categories[keyword] || '未分类';
         const isIncome = keyword === 'sr';
+        
+        // 合并前缀和后缀作为完整描述
+        const description = (prefix + suffix).trim();
         
         // 检查描述中是否包含日期（支持账单补录）
         let recordDate = fileDate;
