@@ -93,20 +93,31 @@ class AccountingParser {
         const keywords = Object.keys(categories).sort((a, b) => b.length - a.length);
         const keywordPattern = keywords.join('|');
         
-        // 提取记账信息 - 支持有空格或无空格的格式
-        // 匹配格式：#cy 50 描述 或 #cy50描述 或 #cy全家早餐100元买了3个鸡蛋
-        // 使用非贪婪匹配 .*? 找到第一个数字作为金额
-        const regex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s*(.*?)([\\d.]+)(.*)`, 'g');
-        const match = regex.exec(line);
+        // 第一步：匹配 #关键词 后面的所有内容
+        const keywordRegex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s+(.+)`, 'i');
+        const keywordMatch = keywordRegex.exec(line);
         
-        if (!match) return null;
+        if (!keywordMatch) return null;
 
-        const [, keyword, prefix, amount, suffix] = match;
+        const keyword = keywordMatch[1];
+        const restContent = keywordMatch[2]; // #cy 后面的所有内容
+        
+        // 第二步：从剩余内容中提取第一个出现的数字作为金额
+        const amountRegex = /[\d.]+/;
+        const amountMatch = restContent.match(amountRegex);
+        
+        if (!amountMatch) return null;
+        
+        const amount = parseFloat(amountMatch[0]);
+        if (isNaN(amount) || amount <= 0) return null;
+        
         const category = categories[keyword] || '未分类';
         const isIncome = keyword === 'sr';
         
-        // 合并前缀和后缀作为完整描述
-        const description = (prefix + suffix).trim();
+        // 第三步：提取描述（移除金额和紧跟的货币单位）
+        // 匹配金额后面可能跟着的货币单位：元、块、块钱
+        const amountWithUnit = new RegExp(amountMatch[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(元|块钱|块)?');
+        const description = restContent.replace(amountWithUnit, '').trim();
         
         // 检查描述中是否包含日期（支持账单补录）
         let recordDate = fileDate;
