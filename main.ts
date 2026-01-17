@@ -93,8 +93,8 @@ class AccountingParser {
         const keywords = Object.keys(categories).sort((a, b) => b.length - a.length);
         const keywordPattern = keywords.join('|');
         
-        // 第一步：匹配 #关键词 后面的所有内容
-        const keywordRegex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s+(.+)`, 'i');
+        // 第一步：匹配 #关键词 后面的所有内容（支持无空格格式）
+        const keywordRegex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s*(.+)`, 'i');
         const keywordMatch = keywordRegex.exec(line);
         
         if (!keywordMatch) return null;
@@ -115,8 +115,8 @@ class AccountingParser {
         const isIncome = keyword === 'sr';
         
         // 第三步：提取描述（移除金额和紧跟的货币单位）
-        // 匹配金额后面可能跟着的货币单位：元、块、块钱
-        const amountWithUnit = new RegExp(amountMatch[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(元|块钱|块)?');
+        // 匹配金额后面可能跟着的货币单位：块钱、元、块（按长度排序）
+        const amountWithUnit = new RegExp(amountMatch[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(块钱|元|块)?');
         const description = restContent.replace(amountWithUnit, '').trim();
         
         // 检查描述中是否包含日期（支持账单补录）
