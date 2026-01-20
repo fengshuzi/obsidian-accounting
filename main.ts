@@ -1140,12 +1140,11 @@ class DateRangeModal extends Modal {
             cls: 'date-input'
         });
 
-        // 设置默认值
+        // 设置默认值：本月1号到今天
         const today = new Date();
-        const lastMonth = new Date(today);
-        lastMonth.setMonth(lastMonth.getMonth() - 1);
+        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
         
-        this.startInput.value = this.formatDate(lastMonth);
+        this.startInput.value = this.formatDate(firstDayOfMonth);
         this.endInput.value = this.formatDate(today);
 
         // 按钮
@@ -1498,6 +1497,8 @@ class AccountingView extends ItemView {
     
     // 应用时间范围筛选
     applyTimeRange(rangeKey, buttonEl) {
+        console.log(`🔍 应用时间范围筛选: ${rangeKey}`);
+        
         const now = new Date();
         let startDate, endDate, displayText;
         
@@ -1537,10 +1538,16 @@ class AccountingView extends ItemView {
         const startStr = this.formatDate(startDate);
         const endStr = this.formatDate(endDate);
         
+        console.log(`📅 筛选日期范围: ${startStr} 至 ${endStr}`);
+        console.log(`📊 筛选前记录数: ${this.currentRecords.length}`);
+        
         // 应用筛选
         const filteredRecords = this.plugin.storage.filterRecordsByDateRange(
             this.currentRecords, startStr, endStr
         );
+        
+        console.log(`📊 筛选后记录数: ${filteredRecords.length}`);
+        
         this.currentStats = this.plugin.storage.calculateStatistics(filteredRecords);
         
         // 更新显示
@@ -1553,6 +1560,8 @@ class AccountingView extends ItemView {
         
         this.updateStatsDisplay();
         this.updateRecordsDisplay(filteredRecords);
+        
+        console.log(`✅ 时间筛选完成`);
     }
     
     // 重置为本月
@@ -1665,8 +1674,12 @@ class AccountingView extends ItemView {
                 );
                 this.currentStats = this.plugin.storage.calculateStatistics(filteredRecords);
                 
-                this.dateDisplay.textContent = `${startDate} 至 ${endDate}`;
-                this.dateDisplay.style.display = 'block';
+                // 更新时间显示
+                this.timeDisplay.textContent = `自定义 (${startDate} 至 ${endDate})`;
+                this.timeDisplay.style.display = 'block';
+                
+                // 清除所有按钮的激活状态
+                document.querySelectorAll('.quick-time-btn').forEach(btn => btn.classList.remove('active'));
                 
                 this.updateStatsDisplay();
                 this.updateRecordsDisplay(filteredRecords);
