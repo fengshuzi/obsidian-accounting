@@ -207,8 +207,8 @@ class AccountingStorage {
         return true;
     }
 
-    // 获取所有记账记录 - 智能缓存版本
-    async getAllRecords(forceRefresh = false) {
+    // 获取所有记账记录 - 智能缓存版本（已禁用，改为实时加载）
+    async getAllRecordsWithCache(forceRefresh = false) {
         // 如果强制刷新，清除缓存
         if (forceRefresh) {
             this.clearCache();
@@ -256,7 +256,9 @@ class AccountingStorage {
 
     // 获取所有记账记录 - 每次都实时加载
     async getAllRecords(forceRefresh = false): Promise<AccountingRecord[]> {
-        console.log('加载记账记录...');
+        console.log('🔄 开始加载记账记录...');
+        console.log(`📁 日记文件夹路径: ${this.config.journalsPath}`);
+        console.log(`🔍 搜索关键词: ${Object.keys(this.config.categories).map(k => this.config.expenseEmoji + k).join(', ')}`);
         
         let records = [];
         
@@ -264,10 +266,25 @@ class AccountingStorage {
             // 优先使用搜索方式，更高效
             records = await this.getAllRecordsBySearch();
             
+            console.log(`✅ 成功加载 ${records.length} 条记账记录`);
+            
+            // 打印日期分布统计
+            if (records.length > 0) {
+                const dateStats = {};
+                records.forEach(r => {
+                    dateStats[r.date] = (dateStats[r.date] || 0) + 1;
+                });
+                const sortedDates = Object.keys(dateStats).sort();
+                console.log(`📅 日期范围: ${sortedDates[0]} 至 ${sortedDates[sortedDates.length - 1]}`);
+                console.log(`📊 最近5天的记录数:`, Object.fromEntries(
+                    sortedDates.slice(-5).map(d => [d, dateStats[d]])
+                ));
+            }
+            
             return records;
             
         } catch (error) {
-            console.error('获取记账记录失败:', error);
+            console.error('❌ 获取记账记录失败:', error);
             new Notice('获取记账记录失败，请检查日记文件夹');
             return [];
         }
@@ -281,12 +298,44 @@ class AccountingStorage {
         try {
             // 获取所有配置的关键词
             const keywords = Object.keys(categories);
-            console.log(`开始基于关键词搜索: ${keywords.map(k => expenseEmoji + k).join(', ')}`);
+            console.log(`🔍 开始基于关键词搜索: ${keywords.map(k => expenseEmoji + k).join(', ')}`);
+            
+            // 先检查 journals 文件夹中有哪些文件
+            const allJournalFiles = this.app.vault.getMarkdownFiles().filter(file => 
+                file.path.startsWith(this.config.journalsPath)
+            );
+            console.log(`📁 journals 文件夹中共有 ${allJournalFiles.length} 个 markdown 文件`);
+            
+            // 打印最近10个文件
+            const recentFiles = allJournalFiles
+                .filter(f => /\d{4}-\d{2}-\d{2}\.md$/.test(f.name))
+                .sort((a, b) => b.name.localeCompare(a.name))
+                .slice(0, 10);
+            console.log(`📄 最近的日期文件:`, recentFiles.map(f => f.name).join(', '));
+            
+            // 检查今天和最近几天的文件是否存在
+            const today = new Date();
+            const checkDates = [];
+            for (let i = 0; i < 5; i++) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
+                const dateStr = formatLocalDate(date);
+                const fileName = `${dateStr}.md`;
+                const filePath = `${this.config.journalsPath}/${fileName}`;
+                const file = this.app.vault.getAbstractFileByPath(filePath);
+                checkDates.push({
+                    date: dateStr,
+                    exists: file !== null,
+                    path: filePath
+                });
+            }
+            console.log(`🔍 检查最近5天的文件:`, checkDates);
             
             // 使用关键词搜索文件
             const searchResults = await this.searchFilesWithKeywords(keywords, expenseEmoji);
             
-            console.log(`通过关键词搜索找到 ${searchResults.length} 个包含记账记录的文件`);
+            console.log(`✅ 通过关键词搜索找到 ${searchResults.length} 个包含记账记录的文件`);
+            console.log(`📄 搜索到的文件:`, searchResults.map(f => f.name).join(', '));
             
             // 只处理搜索到的文件
             for (const file of searchResults) {
@@ -294,21 +343,21 @@ class AccountingStorage {
                     const content = await this.app.vault.read(file);
                     const fileRecords = this.parser.parseFileContent(content, file.path);
                     if (fileRecords.length > 0) {
-                        console.log(`在 ${file.path} 中找到 ${fileRecords.length} 条记账记录`);
+                        console.log(`  ✓ ${file.path}: ${fileRecords.length} 条记录`);
                         records.push(...fileRecords);
                     }
                 } catch (error) {
-                    console.error(`读取搜索结果文件 ${file.path} 失败:`, error);
+                    console.error(`  ✗ 读取文件 ${file.path} 失败:`, error);
                 }
             }
             
-            console.log(`总共找到 ${records.length} 条记账记录`);
-            return records.sort((a, b) => new Date(b.date) - new Date(a.date));
+            console.log(`✅ 总共找到 ${records.length} 条记账记录`);
+            return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
             
         } catch (error) {
-            console.error('关键词搜索功能失败:', error);
+            console.error('❌ 关键词搜索功能失败:', error);
             // 如果搜索失败，回退到优化的遍历方式
-            console.log('回退到传统扫描方式...');
+            console.log('🔄 回退到传统扫描方式...');
             return await this.getAllRecordsByOptimizedTraversal();
         }
     }
@@ -417,20 +466,25 @@ class AccountingStorage {
         const dateFiles = allFiles.filter(file => datePattern.test(file.name));
         
         console.log(`⚠️ 警告: Obsidian 搜索引擎不可用，回退到文件扫描模式`);
-        console.log(`总文件数: ${allFiles.length}，日期格式文件: ${dateFiles.length}`);
-        console.log(`搜索关键词: ${keywords.map(k => expenseEmoji + k).join(', ')}`);
+        console.log(`📁 总文件数: ${allFiles.length}，日期格式文件: ${dateFiles.length}`);
+        console.log(`🔍 搜索关键词: ${keywords.map(k => expenseEmoji + k).join(', ')}`);
         
-        // 构建正则表达式 - 只匹配配置的关键词
+        // 打印最近10个日期文件
+        const recentDateFiles = dateFiles
+            .sort((a, b) => b.name.localeCompare(a.name))
+            .slice(0, 10);
+        console.log(`📄 最近10个日期文件:`, recentDateFiles.map(f => f.name).join(', '));
+        
+        // 构建正则表达式 - 匹配 #关键词 后面跟数字（可能有空格，也可能没有）
         const keywordPattern = keywords.join('|');
-        const searchRegex = new RegExp(`${expenseEmoji}\\s*(${keywordPattern})\\s+[\\d.]+`, 'g');
-        
-        // 尝试使用缓存的文件内容（如果可用）
-        let usedCache = 0;
-        let readFromDisk = 0;
+        // 注意：不使用 g 标志，避免 lastIndex 状态问题
+        const searchPattern = `${expenseEmoji}\\s*(${keywordPattern})\\s*.*?[\\d.]+`;
         
         // 使用并行搜索，但分批处理以避免性能问题
-        const batchSize = 50; // 每批处理50个文件
+        const batchSize = 50;
         let processedCount = 0;
+        let usedCache = 0;
+        let readFromDisk = 0;
         
         for (let i = 0; i < dateFiles.length; i += batchSize) {
             const batch = dateFiles.slice(i, i + batchSize);
@@ -442,22 +496,23 @@ class AccountingStorage {
                     // 尝试从缓存获取内容
                     const cachedMetadata = metadataCache.getFileCache(file);
                     if (cachedMetadata && cachedMetadata.sections) {
-                        // 如果有缓存，尝试快速检查
                         content = await vault.cachedRead(file);
                         usedCache++;
                     } else {
-                        // 从磁盘读取
                         content = await vault.read(file);
                         readFromDisk++;
                     }
                     
                     // 使用正则表达式检查是否包含有效的记账记录
-                    if (searchRegex.test(content)) {
+                    // 每次都创建新的正则对象，避免 g 标志的状态问题
+                    const regex = new RegExp(searchPattern);
+                    if (regex.test(content)) {
+                        console.log(`  ✓ 找到匹配文件: ${file.name}`);
                         return file;
                     }
                     return null;
                 } catch (error) {
-                    console.error(`检查文件 ${file.path} 失败:`, error);
+                    console.error(`  ✗ 检查文件 ${file.path} 失败:`, error);
                     return null;
                 }
             });
@@ -470,7 +525,7 @@ class AccountingStorage {
             
             // 每50个文件显示一次进度
             if (processedCount % 50 === 0 || processedCount === dateFiles.length) {
-                console.log(`已扫描 ${processedCount}/${dateFiles.length} 个日期文件，找到 ${matchingFiles.size} 个包含记账记录的文件`);
+                console.log(`📊 已扫描 ${processedCount}/${dateFiles.length} 个日期文件，找到 ${matchingFiles.size} 个包含记账记录的文件`);
             }
         }
         
