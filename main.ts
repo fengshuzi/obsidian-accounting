@@ -1144,8 +1144,9 @@ class DateRangeModal extends Modal {
         const today = new Date();
         const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
         
-        this.startInput.value = this.formatDate(firstDayOfMonth);
-        this.endInput.value = this.formatDate(today);
+        // 使用本地日期格式，避免时区问题
+        this.startInput.value = formatLocalDate(firstDayOfMonth);
+        this.endInput.value = formatLocalDate(today);
 
         // 按钮
         const buttons = contentEl.createDiv('date-buttons');
