@@ -1,4 +1,6 @@
 import { Plugin, ItemView, Modal, Notice, Menu, TFile } from 'obsidian';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // 类型定义
 interface AccountingConfig {
@@ -153,7 +155,7 @@ class AccountingParser {
         
         // 从文件路径提取日期
         const dateMatch = filePath.match(/(\d{4}-\d{2}-\d{2})/);
-        const fileDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+        const fileDate = dateMatch ? dateMatch[1] : formatLocalDate(new Date());
 
         lines.forEach(line => {
             const record = this.parseRecord(line, fileDate);
@@ -1174,9 +1176,371 @@ class DateRangeModal extends Modal {
         };
     }
 
-    formatDate(date) {
-        return date.toISOString().split('T')[0];
+    formatDate(date: Date): string {
+        // 使用本地时区格式化日期，避免 UTC 时区问题
+        return formatLocalDate(date);
     }
+}
+
+// PDF 导出模态框
+class ExportPDFModal extends Modal {
+    plugin: any;
+    records: AccountingRecord[];
+    stats: AccountingStats;
+    dateRange: { start: string; end: string; label: string };
+    
+    constructor(app: any, plugin: any, records: AccountingRecord[], stats: AccountingStats, dateRange: { start: string; end: string; label: string }) {
+        super(app);
+        this.plugin = plugin;
+        this.records = records;
+        this.stats = stats;
+        this.dateRange = dateRange;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('export-pdf-modal');
+
+        this.titleEl.setText('导出账单 PDF');
+
+        // 预览区域
+        const previewSection = contentEl.createDiv('export-preview-section');
+        previewSection.createEl('label', { text: '预览', cls: 'export-label' });
+        
+        const previewContainer = previewSection.createDiv('export-preview-container');
+        const previewContent = this.generatePDFContent(previewContainer);
+        
+        // 按钮组
+        const buttons = contentEl.createDiv('export-buttons');
+        
+        const cancelBtn = buttons.createEl('button', {
+            text: '取消',
+            cls: 'export-btn export-btn-cancel'
+        });
+        cancelBtn.onclick = () => this.close();
+        
+        const exportBtn = buttons.createEl('button', {
+            text: '导出 PDF',
+            cls: 'export-btn export-btn-export'
+        });
+        exportBtn.onclick = () => this.exportToPDF();
+    }
+
+    generatePDFContent(container: HTMLElement): HTMLElement {
+        const content = container.createDiv('pdf-content');
+        
+        // 标题
+        const appName = this.plugin.config.appName || '每日记账';
+        content.createEl('h1', { 
+            text: `${appName} - 账单报告`, 
+            cls: 'pdf-title' 
+        });
+        
+        // 时间范围
+        content.createEl('p', { 
+            text: `时间范围: ${this.dateRange.label} (${this.dateRange.start} 至 ${this.dateRange.end})`,
+            cls: 'pdf-date-range'
+        });
+        
+        content.createEl('p', {
+            text: `导出时间: ${formatLocalDate(new Date())} ${new Date().toLocaleTimeString('zh-CN')}`,
+            cls: 'pdf-export-time'
+        });
+
+        // 统计概览
+        const statsSection = content.createDiv('pdf-stats-section');
+        statsSection.createEl('h2', { text: '统计概览' });
+        
+        const statsGrid = statsSection.createDiv('pdf-stats-grid');
+        
+        const { totalIncome, totalExpense } = this.stats;
+        const balance = totalIncome - totalExpense;
+        
+        // 收入
+        const incomeCard = statsGrid.createDiv('pdf-stat-card income');
+        incomeCard.createDiv({ text: '总收入', cls: 'pdf-stat-label' });
+        incomeCard.createDiv({ text: `¥${totalIncome.toFixed(2)}`, cls: 'pdf-stat-value' });
+        
+        // 支出
+        const expenseCard = statsGrid.createDiv('pdf-stat-card expense');
+        expenseCard.createDiv({ text: '总支出', cls: 'pdf-stat-label' });
+        expenseCard.createDiv({ text: `¥${totalExpense.toFixed(2)}`, cls: 'pdf-stat-value' });
+        
+        // 结余
+        const balanceCard = statsGrid.createDiv(`pdf-stat-card ${balance >= 0 ? 'positive' : 'negative'}`);
+        balanceCard.createDiv({ text: '结余', cls: 'pdf-stat-label' });
+        balanceCard.createDiv({ text: `¥${balance.toFixed(2)}`, cls: 'pdf-stat-value' });
+
+        // 分类统计
+        if (Object.keys(this.stats.categoryStats).length > 0) {
+            const categorySection = content.createDiv('pdf-category-section');
+            categorySection.createEl('h2', { text: '分类统计' });
+            
+            const categoryTable = categorySection.createEl('table', { cls: 'pdf-table' });
+            const thead = categoryTable.createEl('thead');
+            const headerRow = thead.createEl('tr');
+            headerRow.createEl('th', { text: '分类' });
+            headerRow.createEl('th', { text: '金额' });
+            headerRow.createEl('th', { text: '笔数' });
+            headerRow.createEl('th', { text: '占比' });
+            
+            const tbody = categoryTable.createEl('tbody');
+            
+            // 计算总支出用于占比
+            const totalForPercentage = totalExpense > 0 ? totalExpense : 1;
+            
+            Object.entries(this.stats.categoryStats)
+                .sort(([,a], [,b]) => b.total - a.total)
+                .forEach(([category, data]) => {
+                    const row = tbody.createEl('tr');
+                    row.createEl('td', { text: category });
+                    row.createEl('td', { text: `¥${data.total.toFixed(2)}` });
+                    row.createEl('td', { text: `${data.count} 笔` });
+                    
+                    // 收入类别不计算占比
+                    const isIncome = data.records.some(r => r.isIncome);
+                    const percentage = isIncome ? '-' : `${((data.total / totalForPercentage) * 100).toFixed(1)}%`;
+                    row.createEl('td', { text: percentage });
+                });
+        }
+
+        // 详细记录
+        const recordsSection = content.createDiv('pdf-records-section');
+        recordsSection.createEl('h2', { text: `详细记录 (共 ${this.records.length} 笔)` });
+        
+        // 按日期分组
+        const groupedRecords = this.groupRecordsByDate(this.records);
+        
+        Object.entries(groupedRecords)
+            .sort(([a], [b]) => new Date(b).getTime() - new Date(a).getTime())
+            .forEach(([date, dayRecords]) => {
+                const dayGroup = recordsSection.createDiv('pdf-day-group');
+                
+                // 日期头部
+                const dayHeader = dayGroup.createDiv('pdf-day-header');
+                const dayTotal = dayRecords.reduce((sum, r) => sum + (r.isIncome ? r.amount : -r.amount), 0);
+                dayHeader.createSpan({ text: date, cls: 'pdf-day-date' });
+                dayHeader.createSpan({ 
+                    text: `¥${dayTotal.toFixed(2)}`, 
+                    cls: `pdf-day-total ${dayTotal >= 0 ? 'positive' : 'negative'}`
+                });
+                
+                // 日期下的记录表格
+                const dayTable = dayGroup.createEl('table', { cls: 'pdf-table pdf-day-table' });
+                const dayTbody = dayTable.createEl('tbody');
+                
+                dayRecords.forEach(record => {
+                    const row = dayTbody.createEl('tr');
+                    row.createEl('td', { text: record.category, cls: 'pdf-record-category' });
+                    row.createEl('td', { text: record.description || '-', cls: 'pdf-record-desc' });
+                    
+                    const amountCell = row.createEl('td', { cls: 'pdf-record-amount' });
+                    amountCell.textContent = record.isIncome ? `+¥${record.amount}` : `-¥${record.amount}`;
+                    amountCell.classList.add(record.isIncome ? 'income' : 'expense');
+                });
+            });
+
+        return content;
+    }
+
+    groupRecordsByDate(records: AccountingRecord[]): Record<string, AccountingRecord[]> {
+        const grouped: Record<string, AccountingRecord[]> = {};
+        records.forEach(record => {
+            if (!grouped[record.date]) {
+                grouped[record.date] = [];
+            }
+            grouped[record.date].push(record);
+        });
+        return grouped;
+    }
+
+    async exportToPDF() {
+        try {
+            new Notice('正在生成 PDF...');
+            
+            // 获取预览容器
+            const previewContainer = this.contentEl.querySelector('.export-preview-container') as HTMLElement;
+            if (!previewContainer) {
+                throw new Error('找不到预览内容');
+            }
+
+            // 创建一个临时容器用于渲染 PDF 内容
+            const tempContainer = document.createElement('div');
+            tempContainer.style.position = 'absolute';
+            tempContainer.style.left = '-9999px';
+            tempContainer.style.top = '0';
+            tempContainer.style.width = '800px';
+            tempContainer.style.padding = '20px';
+            tempContainer.style.background = '#ffffff';
+            tempContainer.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+            tempContainer.innerHTML = this.generatePDFHTML();
+            document.body.appendChild(tempContainer);
+
+            // 等待渲染完成
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // 使用 html2canvas 将 HTML 转换为 canvas
+            const canvas = await html2canvas(tempContainer, {
+                scale: 2, // 提高清晰度
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff'
+            });
+
+            // 清理临时容器
+            document.body.removeChild(tempContainer);
+
+            // 创建 PDF
+            const imgWidth = 210; // A4 宽度 (mm)
+            const pageHeight = 297; // A4 高度 (mm)
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            
+            // 如果内容超过一页，需要分页
+            let heightLeft = imgHeight;
+            let position = 0;
+            const imgData = canvas.toDataURL('image/png');
+
+            // 添加第一页
+            pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+            heightLeft -= pageHeight;
+
+            // 添加后续页面
+            while (heightLeft > 0) {
+                position = heightLeft - imgHeight;
+                pdf.addPage();
+                pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+            }
+
+            // 生成文件名
+            const appName = this.plugin.config.appName || '每日记账';
+            const fileName = `${appName}_${this.dateRange.start}_${this.dateRange.end}.pdf`;
+
+            // 保存 PDF
+            pdf.save(fileName);
+
+            new Notice(`PDF 已保存: ${fileName}`);
+            this.close();
+        } catch (error) {
+            console.error('导出 PDF 失败:', error);
+            new Notice('导出 PDF 失败，请重试');
+        }
+    }
+
+    // 生成用于 PDF 渲染的 HTML
+    generatePDFHTML(): string {
+        const appName = this.plugin.config.appName || '每日记账';
+        const { totalIncome, totalExpense } = this.stats;
+        const balance = totalIncome - totalExpense;
+        
+        // 按日期分组
+        const groupedRecords = this.groupRecordsByDate(this.records);
+        const sortedDates = Object.keys(groupedRecords).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+        
+        // 生成分类统计 HTML
+        let categoryStatsHTML = '';
+        if (Object.keys(this.stats.categoryStats).length > 0) {
+            const totalForPercentage = totalExpense > 0 ? totalExpense : 1;
+            const categoryRows = Object.entries(this.stats.categoryStats)
+                .sort(([,a], [,b]) => b.total - a.total)
+                .map(([category, data]) => {
+                    const isIncome = data.records.some(r => r.isIncome);
+                    const percentage = isIncome ? '-' : `${((data.total / totalForPercentage) * 100).toFixed(1)}%`;
+                    return `
+                        <tr>
+                            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">${category}</td>
+                            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">¥${data.total.toFixed(2)}</td>
+                            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">${data.count} 笔</td>
+                            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">${percentage}</td>
+                        </tr>
+                    `;
+                })
+                .join('');
+            
+            categoryStatsHTML = `
+                <div style="margin: 20px 0;">
+                    <h2 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #374151;">分类统计</h2>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 1px solid #e5e7eb;">
+                        <thead>
+                            <tr style="background: #f9fafb;">
+                                <th style="padding: 8px 12px; text-align: left; font-weight: 600;">分类</th>
+                                <th style="padding: 8px 12px; text-align: left; font-weight: 600;">金额</th>
+                                <th style="padding: 8px 12px; text-align: left; font-weight: 600;">笔数</th>
+                                <th style="padding: 8px 12px; text-align: left; font-weight: 600;">占比</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${categoryRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+        
+        // 生成详细记录 HTML
+        const recordsHTML = sortedDates.map(date => {
+            const dayRecords = groupedRecords[date];
+            const dayTotal = dayRecords.reduce((sum, r) => sum + (r.isIncome ? r.amount : -r.amount), 0);
+            
+            const recordRows = dayRecords.map(record => `
+                <tr>
+                    <td style="padding: 6px 12px; border-bottom: 1px solid #f3f4f6; font-weight: 500; width: 80px;">${record.category}</td>
+                    <td style="padding: 6px 12px; border-bottom: 1px solid #f3f4f6; color: #6b7280;">${record.description || '-'}</td>
+                    <td style="padding: 6px 12px; border-bottom: 1px solid #f3f4f6; text-align: right; font-weight: 600; width: 100px; color: ${record.isIncome ? '#059669' : '#dc2626'};">
+                        ${record.isIncome ? '+' : '-'}¥${record.amount.toFixed(2)}
+                    </td>
+                </tr>
+            `).join('');
+            
+            return `
+                <div style="margin: 12px 0; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+                        <span style="font-weight: 600; color: #1a1a1a;">${date}</span>
+                        <span style="font-weight: 700; color: ${dayTotal >= 0 ? '#059669' : '#dc2626'};">¥${dayTotal.toFixed(2)}</span>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <tbody>
+                            ${recordRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #1a1a1a; line-height: 1.6;">
+                <h1 style="font-size: 22px; font-weight: 700; margin-bottom: 8px; color: #1a1a1a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">${appName} - 账单报告</h1>
+                <p style="color: #6b7280; font-size: 13px; margin-bottom: 4px;">时间范围: ${this.dateRange.label} (${this.dateRange.start} 至 ${this.dateRange.end})</p>
+                <p style="color: #6b7280; font-size: 13px; margin-bottom: 16px;">导出时间: ${formatLocalDate(new Date())} ${new Date().toLocaleTimeString('zh-CN')}</p>
+                
+                <div style="display: flex; gap: 12px; margin: 16px 0;">
+                    <div style="flex: 1; padding: 14px; border-radius: 6px; text-align: center; background: #f0fdf4; border: 1px solid #bbf7d0;">
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">总收入</div>
+                        <div style="font-size: 18px; font-weight: 700; color: #059669;">¥${totalIncome.toFixed(2)}</div>
+                    </div>
+                    <div style="flex: 1; padding: 14px; border-radius: 6px; text-align: center; background: #fef3c7; border: 1px solid #fcd34d;">
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">总支出</div>
+                        <div style="font-size: 18px; font-weight: 700; color: #dc2626;">¥${totalExpense.toFixed(2)}</div>
+                    </div>
+                    <div style="flex: 1; padding: 14px; border-radius: 6px; text-align: center; background: ${balance >= 0 ? '#ecfdf5' : '#fef2f2'}; border: 1px solid ${balance >= 0 ? '#86efac' : '#fca5a5'};">
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">结余</div>
+                        <div style="font-size: 18px; font-weight: 700; color: ${balance >= 0 ? '#059669' : '#dc2626'};">¥${balance.toFixed(2)}</div>
+                    </div>
+                </div>
+                
+                ${categoryStatsHTML}
+                
+                <div style="margin: 20px 0;">
+                    <h2 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #374151;">详细记录 (共 ${this.records.length} 笔)</h2>
+                    ${recordsHTML}
+                </div>
+            </div>
+        `;
+    }
+
 }
 
 // 快速记账模态框
@@ -1384,6 +1748,8 @@ class AccountingView extends ItemView {
     plugin: any;
     currentRecords: AccountingRecord[];
     currentStats: AccountingStats;
+    filteredRecords: AccountingRecord[];
+    currentDateRange: { start: string; end: string; label: string };
     statsContainer: HTMLElement;
     recordsContainer: HTMLElement;
     timeDisplay: HTMLElement;
@@ -1393,6 +1759,8 @@ class AccountingView extends ItemView {
         this.plugin = plugin;
         this.currentRecords = [];
         this.currentStats = null;
+        this.filteredRecords = [];
+        this.currentDateRange = { start: '', end: '', label: '本月' };
     }
 
     getViewType() {
@@ -1449,6 +1817,12 @@ class AccountingView extends ItemView {
             cls: 'accounting-btn'
         });
         refreshBtn.onclick = () => this.loadAllRecords(true); // 强制刷新
+
+        const exportBtn = actions.createEl('button', {
+            text: '导出 PDF',
+            cls: 'accounting-btn'
+        });
+        exportBtn.onclick = () => this.showExportPDFModal();
 
         const configBtn = actions.createEl('button', {
             text: '配置分类',
@@ -1549,6 +1923,10 @@ class AccountingView extends ItemView {
         
         console.log(`📊 筛选后记录数: ${filteredRecords.length}`);
         
+        // 保存筛选后的记录和日期范围
+        this.filteredRecords = filteredRecords;
+        this.currentDateRange = { start: startStr, end: endStr, label: displayText };
+        
         this.currentStats = this.plugin.storage.calculateStatistics(filteredRecords);
         
         // 更新显示
@@ -1608,9 +1986,9 @@ class AccountingView extends ItemView {
         return new Date(d.setDate(diff));
     }
     
-    // 格式化日期为 YYYY-MM-DD
-    formatDate(date) {
-        return date.toISOString().split('T')[0];
+    // 格式化日期为 YYYY-MM-DD（使用本地时区）
+    formatDate(date: Date): string {
+        return formatLocalDate(date);
     }
 
     renderStats(container) {
@@ -1649,6 +2027,11 @@ class AccountingView extends ItemView {
         const filteredRecords = this.plugin.storage.filterRecordsByDateRange(
             this.currentRecords, startStr, endStr
         );
+        
+        // 保存筛选后的记录和日期范围
+        this.filteredRecords = filteredRecords;
+        this.currentDateRange = { start: startStr, end: endStr, label: '本月' };
+        
         this.currentStats = this.plugin.storage.calculateStatistics(filteredRecords);
         
         // 更新显示
@@ -1673,6 +2056,11 @@ class AccountingView extends ItemView {
                 const filteredRecords = this.plugin.storage.filterRecordsByDateRange(
                     this.currentRecords, startDate, endDate
                 );
+                
+                // 保存筛选后的记录和日期范围
+                this.filteredRecords = filteredRecords;
+                this.currentDateRange = { start: startDate, end: endDate, label: '自定义' };
+                
                 this.currentStats = this.plugin.storage.calculateStatistics(filteredRecords);
                 
                 // 更新时间显示
@@ -1995,6 +2383,21 @@ class AccountingView extends ItemView {
             await this.loadAllRecords(true);
         }).open();
     }
+    
+    showExportPDFModal() {
+        if (this.filteredRecords.length === 0) {
+            new Notice('当前时间范围内没有记账记录');
+            return;
+        }
+        
+        new ExportPDFModal(
+            this.app, 
+            this.plugin, 
+            this.filteredRecords, 
+            this.currentStats, 
+            this.currentDateRange
+        ).open();
+    }
 }
 
 // 主插件类
@@ -2038,6 +2441,13 @@ export default class AccountingPlugin extends Plugin {
             name: '快速记账',
             icon: 'wallet',
             callback: () => this.openQuickEntry()
+        });
+
+        this.addCommand({
+            id: 'export-pdf',
+            name: '导出账单 PDF',
+            icon: 'file-down',
+            callback: () => this.exportPDF()
         });
     }
 
@@ -2120,5 +2530,24 @@ export default class AccountingPlugin extends Plugin {
             // 保存后的回调：刷新所有打开的记账视图
             await this.refreshData();
         }).open();
+    }
+
+    async exportPDF() {
+        // 先确保视图已打开
+        const leaves = this.app.workspace.getLeavesOfType(ACCOUNTING_VIEW);
+        if (leaves.length > 0 && leaves[0].view instanceof AccountingView) {
+            const view = leaves[0].view as AccountingView;
+            view.showExportPDFModal();
+        } else {
+            // 如果视图未打开，先打开视图再导出
+            await this.activateView();
+            setTimeout(() => {
+                const leaves = this.app.workspace.getLeavesOfType(ACCOUNTING_VIEW);
+                if (leaves.length > 0 && leaves[0].view instanceof AccountingView) {
+                    const view = leaves[0].view as AccountingView;
+                    view.showExportPDFModal();
+                }
+            }, 500);
+        }
     }
 }

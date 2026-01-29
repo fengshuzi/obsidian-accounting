@@ -1430,3 +1430,285 @@
 .config-select-input:hover {
     background: var(--background-modifier-hover);
 }
+
+/* 导出 PDF 模态框样式 */
+.export-pdf-modal {
+    padding: 24px;
+    min-width: 600px;
+    max-width: 700px;
+    background: var(--background-primary);
+    border-radius: 12px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.export-preview-section {
+    margin-bottom: 24px;
+}
+
+.export-label {
+    display: block;
+    margin-bottom: 12px;
+    font-weight: 600;
+    color: var(--text-normal);
+    font-size: 14px;
+}
+
+.export-preview-container {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-primary);
+}
+
+/* PDF 内容预览样式 */
+.pdf-content {
+    padding: 20px;
+    font-size: 13px;
+}
+
+.pdf-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text-normal);
+    border-bottom: 2px solid var(--interactive-accent);
+    padding-bottom: 10px;
+}
+
+.pdf-date-range,
+.pdf-export-time {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.pdf-stats-section {
+    margin: 20px 0;
+}
+
+.pdf-stats-section h2,
+.pdf-category-section h2,
+.pdf-records-section h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--text-normal);
+}
+
+.pdf-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.pdf-stat-card {
+    padding: 12px;
+    border-radius: 6px;
+    text-align: center;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.pdf-stat-card.income {
+    background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+    border-color: #bbf7d0;
+}
+
+.pdf-stat-card.expense {
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    border-color: #fcd34d;
+}
+
+.pdf-stat-card.positive {
+    background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+    border-color: #86efac;
+}
+
+.pdf-stat-card.negative {
+    background: linear-gradient(135deg, #fef2f2, #fecaca);
+    border-color: #fca5a5;
+}
+
+.pdf-stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.pdf-stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-normal);
+}
+
+.pdf-category-section,
+.pdf-records-section {
+    margin: 20px 0;
+}
+
+.pdf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.pdf-table th,
+.pdf-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.pdf-table th {
+    background: var(--background-secondary);
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.pdf-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.pdf-day-group {
+    margin: 12px 0;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.pdf-day-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.pdf-day-date {
+    font-weight: 600;
+    color: var(--text-normal);
+    font-size: 13px;
+}
+
+.pdf-day-total {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.pdf-day-total.positive {
+    color: #059669;
+}
+
+.pdf-day-total.negative {
+    color: #dc2626;
+}
+
+.pdf-day-table {
+    border: none;
+    border-radius: 0;
+}
+
+.pdf-day-table td {
+    padding: 6px 14px;
+}
+
+.pdf-record-category {
+    font-weight: 500;
+    color: var(--text-normal);
+    width: 70px;
+}
+
+.pdf-record-desc {
+    color: var(--text-muted);
+}
+
+.pdf-record-amount {
+    text-align: right;
+    font-weight: 600;
+    width: 90px;
+}
+
+.pdf-record-amount.income {
+    color: #059669;
+}
+
+.pdf-record-amount.expense {
+    color: #dc2626;
+}
+
+/* 导出按钮组 */
+.export-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.export-btn {
+    padding: 10px 24px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.export-btn-cancel {
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.export-btn-cancel:hover {
+    background: var(--background-modifier-hover);
+}
+
+.export-btn-export {
+    background: linear-gradient(135deg, var(--interactive-accent), #3b82f6);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+.export-btn-export:hover {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+}
+
+/* 响应式 */
+@media (max-width: 600px) {
+    .export-pdf-modal {
+        width: 95vw;
+        max-width: 95vw;
+        min-width: 95vw;
+        padding: 16px;
+    }
+    
+    .export-preview-container {
+        max-height: 300px;
+    }
+    
+    .pdf-stats-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    
+    .pdf-content {
+        padding: 12px;
+    }
+    
+    .pdf-title {
+        font-size: 16px;
+    }
+}
