@@ -1185,10 +1185,30 @@ class DateRangeModal extends Modal {
 // Markdown 导出模态框
 class MarkdownExportModal extends Modal {
     markdown: string;
+    fileName: string;
+    folders: string[];
+    selectedFolder: string;
+    fileNameInput: HTMLInputElement;
     
-    constructor(app: any, markdown: string) {
+    constructor(app: any, markdown: string, fileName: string) {
         super(app);
         this.markdown = markdown;
+        this.fileName = fileName;
+        this.folders = this.getAllFolders();
+        this.selectedFolder = this.folders[0] || '/';
+    }
+
+    getAllFolders(): string[] {
+        const folders: string[] = ['/'];  // 根目录
+        const allFiles = this.app.vault.getAllLoadedFiles();
+        
+        allFiles.forEach((file: any) => {
+            if (file.children !== undefined) {  // 是文件夹
+                folders.push(file.path);
+            }
+        });
+        
+        return folders.sort();
     }
 
     onOpen() {
@@ -1198,17 +1218,48 @@ class MarkdownExportModal extends Modal {
 
         this.titleEl.setText('导出 Markdown');
 
-        // 提示信息
-        const hint = contentEl.createDiv('export-hint');
-        hint.innerHTML = '✅ 已复制到剪贴板！你可以直接粘贴给 AI 进行分析。';
+        // 保存设置区域
+        const saveSection = contentEl.createDiv('export-save-section');
+        
+        // 文件夹选择
+        const folderGroup = saveSection.createDiv('export-input-group');
+        folderGroup.createEl('label', { text: '保存位置：', cls: 'export-label' });
+        
+        const folderSelect = folderGroup.createEl('select', {
+            cls: 'export-folder-select'
+        });
+        
+        this.folders.forEach(folder => {
+            const option = folderSelect.createEl('option', {
+                value: folder,
+                text: folder === '/' ? '/ (根目录)' : folder
+            });
+        });
+        
+        folderSelect.onchange = () => {
+            this.selectedFolder = folderSelect.value;
+        };
+
+        // 文件名输入
+        const fileNameGroup = saveSection.createDiv('export-input-group');
+        fileNameGroup.createEl('label', { text: '文件名：', cls: 'export-label' });
+        
+        const fileNameWrapper = fileNameGroup.createDiv('export-filename-wrapper');
+        this.fileNameInput = fileNameWrapper.createEl('input', {
+            type: 'text',
+            cls: 'export-filename-input',
+            value: this.fileName,
+            attr: { placeholder: '输入文件名' }
+        });
+        fileNameWrapper.createSpan({ text: '.md', cls: 'export-filename-ext' });
 
         // 预览区域
         const previewSection = contentEl.createDiv('markdown-preview-section');
-        previewSection.createEl('label', { text: '预览', cls: 'export-label' });
+        previewSection.createEl('label', { text: '预览：', cls: 'export-label' });
         
         const previewContainer = previewSection.createEl('textarea', {
             cls: 'markdown-preview-textarea',
-            attr: { readonly: 'true', rows: '20' }
+            attr: { readonly: 'true', rows: '15' }
         });
         previewContainer.value = this.markdown;
 
@@ -1216,19 +1267,65 @@ class MarkdownExportModal extends Modal {
         const buttons = contentEl.createDiv('export-buttons');
         
         const copyBtn = buttons.createEl('button', {
-            text: '再次复制',
-            cls: 'export-btn export-btn-export'
+            text: '复制到剪贴板',
+            cls: 'export-btn export-btn-cancel'
         });
         copyBtn.onclick = async () => {
             await navigator.clipboard.writeText(this.markdown);
             new Notice('已复制到剪贴板');
         };
 
-        const closeBtn = buttons.createEl('button', {
-            text: '关闭',
-            cls: 'export-btn export-btn-cancel'
+        const saveBtn = buttons.createEl('button', {
+            text: '保存文件',
+            cls: 'export-btn export-btn-export'
         });
-        closeBtn.onclick = () => this.close();
+        saveBtn.onclick = () => this.saveFile();
+    }
+
+    async saveFile() {
+        try {
+            const fileName = this.fileNameInput.value.trim();
+            if (!fileName) {
+                new Notice('请输入文件名');
+                return;
+            }
+
+            // 构建完整路径
+            let filePath: string;
+            if (this.selectedFolder === '/') {
+                filePath = `${fileName}.md`;
+            } else {
+                filePath = `${this.selectedFolder}/${fileName}.md`;
+            }
+
+            // 检查文件是否存在
+            const existingFile = this.app.vault.getAbstractFileByPath(filePath);
+            
+            if (existingFile instanceof TFile) {
+                // 文件存在，询问是否覆盖
+                const confirmed = confirm(`文件 "${filePath}" 已存在，是否覆盖？`);
+                if (!confirmed) {
+                    return;
+                }
+                await this.app.vault.modify(existingFile, this.markdown);
+            } else {
+                // 创建新文件
+                await this.app.vault.create(filePath, this.markdown);
+            }
+
+            new Notice(`已保存到: ${filePath}`);
+            this.close();
+            
+            // 打开保存的文件
+            const file = this.app.vault.getAbstractFileByPath(filePath);
+            if (file instanceof TFile) {
+                const leaf = this.app.workspace.getLeaf();
+                await leaf.openFile(file);
+            }
+        } catch (error) {
+            console.error('保存文件失败:', error);
+            new Notice('保存失败，请检查文件名是否有效');
+        }
     }
 }
 
@@ -2464,12 +2561,12 @@ class AccountingView extends ItemView {
         try {
             const markdown = this.generateMarkdown();
             
-            // 复制到剪贴板
-            await navigator.clipboard.writeText(markdown);
-            new Notice('Markdown 已复制到剪贴板！');
+            // 生成默认文件名：应用名_时间范围
+            const appName = this.plugin.config.appName || '每日记账';
+            const fileName = `${appName}_${this.currentDateRange.start}_${this.currentDateRange.end}`;
             
-            // 同时显示预览模态框
-            new MarkdownExportModal(this.app, markdown).open();
+            // 显示导出模态框
+            new MarkdownExportModal(this.app, markdown, fileName).open();
         } catch (error) {
             console.error('导出 Markdown 失败:', error);
             new Notice('导出失败，请重试');
@@ -2483,18 +2580,10 @@ class AccountingView extends ItemView {
         
         let md = '';
         
-        // 标题
+        // 标题和标签
         md += `# ${appName} - 账单报告\n\n`;
-        md += `**时间范围**: ${this.currentDateRange.label} (${this.currentDateRange.start} 至 ${this.currentDateRange.end})\n\n`;
-        md += `**导出时间**: ${formatLocalDate(new Date())} ${new Date().toLocaleTimeString('zh-CN')}\n\n`;
-        
-        // 统计概览
-        md += `## 统计概览\n\n`;
-        md += `| 项目 | 金额 |\n`;
-        md += `|------|------|\n`;
-        md += `| 总收入 | ¥${totalIncome.toFixed(2)} |\n`;
-        md += `| 总支出 | ¥${totalExpense.toFixed(2)} |\n`;
-        md += `| 结余 | ¥${balance.toFixed(2)} |\n\n`;
+        md += `#每日记账 #账单报告\n\n`;
+        md += `时间范围: ${this.currentDateRange.start} 至 ${this.currentDateRange.end} | 总收入: ¥${totalIncome.toFixed(2)} | 总支出: ¥${totalExpense.toFixed(2)} | 结余: ¥${balance.toFixed(2)}\n\n`;
         
         // 分类统计
         if (Object.keys(categoryStats).length > 0) {
@@ -2515,30 +2604,21 @@ class AccountingView extends ItemView {
             md += '\n';
         }
         
-        // 详细记录
+        // 详细记录 - 一个大表格
         md += `## 详细记录 (共 ${this.filteredRecords.length} 笔)\n\n`;
+        md += `| 日期 | 分类 | 描述 | 金额 |\n`;
+        md += `|------|------|------|------|\n`;
         
-        // 按日期分组
-        const groupedRecords = this.groupRecordsByDate(this.filteredRecords);
+        // 按日期排序（最新的在前）
+        const sortedRecords = [...this.filteredRecords].sort((a, b) => 
+            new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
         
-        Object.entries(groupedRecords)
-            .sort(([a], [b]) => new Date(b).getTime() - new Date(a).getTime())
-            .forEach(([date, dayRecords]) => {
-                const dayTotal = dayRecords.reduce((sum, r) => sum + (r.isIncome ? r.amount : -r.amount), 0);
-                const sign = dayTotal >= 0 ? '+' : '';
-                
-                md += `### ${date} (${sign}¥${dayTotal.toFixed(2)})\n\n`;
-                md += `| 分类 | 描述 | 金额 |\n`;
-                md += `|------|------|------|\n`;
-                
-                dayRecords.forEach(record => {
-                    const amount = record.isIncome ? `+¥${record.amount.toFixed(2)}` : `-¥${record.amount.toFixed(2)}`;
-                    const desc = record.description || '-';
-                    md += `| ${record.category} | ${desc} | ${amount} |\n`;
-                });
-                
-                md += '\n';
-            });
+        sortedRecords.forEach(record => {
+            const amount = record.isIncome ? `+${record.amount.toFixed(2)}` : `-${record.amount.toFixed(2)}`;
+            const desc = record.description || '-';
+            md += `| ${record.date} | ${record.category} | ${desc} | ${amount} |\n`;
+        });
         
         return md;
     }

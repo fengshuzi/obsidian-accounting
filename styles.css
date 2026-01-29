@@ -1458,7 +1458,7 @@
 
 .markdown-preview-textarea {
     width: 100%;
-    min-height: 400px;
+    min-height: 300px;
     padding: 16px;
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     font-size: 13px;
@@ -1468,6 +1468,83 @@
     background: var(--background-primary);
     color: var(--text-normal);
     resize: vertical;
+}
+
+/* 导出保存设置区域 */
+.export-save-section {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.export-input-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.export-input-group:last-child {
+    margin-bottom: 0;
+}
+
+.export-input-group .export-label {
+    min-width: 80px;
+    margin-bottom: 0;
+    font-weight: 500;
+}
+
+.export-folder-select {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.export-folder-select:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+}
+
+.export-filename-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary);
+    overflow: hidden;
+}
+
+.export-filename-wrapper:focus-within {
+    border-color: var(--interactive-accent);
+}
+
+.export-filename-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-normal);
+    font-size: 14px;
+}
+
+.export-filename-input:focus {
+    outline: none;
+}
+
+.export-filename-ext {
+    padding: 8px 12px;
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    font-size: 14px;
+    border-left: 1px solid var(--background-modifier-border);
 }
 
 .markdown-preview-textarea:focus {
