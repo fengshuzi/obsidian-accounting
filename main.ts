@@ -1182,6 +1182,56 @@ class DateRangeModal extends Modal {
     }
 }
 
+// Markdown 导出模态框
+class MarkdownExportModal extends Modal {
+    markdown: string;
+    
+    constructor(app: any, markdown: string) {
+        super(app);
+        this.markdown = markdown;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('markdown-export-modal');
+
+        this.titleEl.setText('导出 Markdown');
+
+        // 提示信息
+        const hint = contentEl.createDiv('export-hint');
+        hint.innerHTML = '✅ 已复制到剪贴板！你可以直接粘贴给 AI 进行分析。';
+
+        // 预览区域
+        const previewSection = contentEl.createDiv('markdown-preview-section');
+        previewSection.createEl('label', { text: '预览', cls: 'export-label' });
+        
+        const previewContainer = previewSection.createEl('textarea', {
+            cls: 'markdown-preview-textarea',
+            attr: { readonly: 'true', rows: '20' }
+        });
+        previewContainer.value = this.markdown;
+
+        // 按钮组
+        const buttons = contentEl.createDiv('export-buttons');
+        
+        const copyBtn = buttons.createEl('button', {
+            text: '再次复制',
+            cls: 'export-btn export-btn-export'
+        });
+        copyBtn.onclick = async () => {
+            await navigator.clipboard.writeText(this.markdown);
+            new Notice('已复制到剪贴板');
+        };
+
+        const closeBtn = buttons.createEl('button', {
+            text: '关闭',
+            cls: 'export-btn export-btn-cancel'
+        });
+        closeBtn.onclick = () => this.close();
+    }
+}
+
 // PDF 导出模态框
 class ExportPDFModal extends Modal {
     plugin: any;
@@ -1818,11 +1868,17 @@ class AccountingView extends ItemView {
         });
         refreshBtn.onclick = () => this.loadAllRecords(true); // 强制刷新
 
-        const exportBtn = actions.createEl('button', {
+        const exportPDFBtn = actions.createEl('button', {
             text: '导出 PDF',
             cls: 'accounting-btn'
         });
-        exportBtn.onclick = () => this.showExportPDFModal();
+        exportPDFBtn.onclick = () => this.showExportPDFModal();
+
+        const exportMDBtn = actions.createEl('button', {
+            text: '导出 MD',
+            cls: 'accounting-btn'
+        });
+        exportMDBtn.onclick = () => this.exportToMarkdown();
 
         const configBtn = actions.createEl('button', {
             text: '配置分类',
@@ -2398,6 +2454,94 @@ class AccountingView extends ItemView {
             this.currentDateRange
         ).open();
     }
+
+    async exportToMarkdown() {
+        if (this.filteredRecords.length === 0) {
+            new Notice('当前时间范围内没有记账记录');
+            return;
+        }
+
+        try {
+            const markdown = this.generateMarkdown();
+            
+            // 复制到剪贴板
+            await navigator.clipboard.writeText(markdown);
+            new Notice('Markdown 已复制到剪贴板！');
+            
+            // 同时显示预览模态框
+            new MarkdownExportModal(this.app, markdown).open();
+        } catch (error) {
+            console.error('导出 Markdown 失败:', error);
+            new Notice('导出失败，请重试');
+        }
+    }
+
+    generateMarkdown(): string {
+        const appName = this.plugin.config.appName || '每日记账';
+        const { totalIncome, totalExpense, categoryStats } = this.currentStats;
+        const balance = totalIncome - totalExpense;
+        
+        let md = '';
+        
+        // 标题
+        md += `# ${appName} - 账单报告\n\n`;
+        md += `**时间范围**: ${this.currentDateRange.label} (${this.currentDateRange.start} 至 ${this.currentDateRange.end})\n\n`;
+        md += `**导出时间**: ${formatLocalDate(new Date())} ${new Date().toLocaleTimeString('zh-CN')}\n\n`;
+        
+        // 统计概览
+        md += `## 统计概览\n\n`;
+        md += `| 项目 | 金额 |\n`;
+        md += `|------|------|\n`;
+        md += `| 总收入 | ¥${totalIncome.toFixed(2)} |\n`;
+        md += `| 总支出 | ¥${totalExpense.toFixed(2)} |\n`;
+        md += `| 结余 | ¥${balance.toFixed(2)} |\n\n`;
+        
+        // 分类统计
+        if (Object.keys(categoryStats).length > 0) {
+            md += `## 分类统计\n\n`;
+            md += `| 分类 | 金额 | 笔数 | 占比 |\n`;
+            md += `|------|------|------|------|\n`;
+            
+            const totalForPercentage = totalExpense > 0 ? totalExpense : 1;
+            
+            Object.entries(categoryStats)
+                .sort(([,a], [,b]) => b.total - a.total)
+                .forEach(([category, data]) => {
+                    const isIncome = data.records.some(r => r.isIncome);
+                    const percentage = isIncome ? '-' : `${((data.total / totalForPercentage) * 100).toFixed(1)}%`;
+                    md += `| ${category} | ¥${data.total.toFixed(2)} | ${data.count} | ${percentage} |\n`;
+                });
+            
+            md += '\n';
+        }
+        
+        // 详细记录
+        md += `## 详细记录 (共 ${this.filteredRecords.length} 笔)\n\n`;
+        
+        // 按日期分组
+        const groupedRecords = this.groupRecordsByDate(this.filteredRecords);
+        
+        Object.entries(groupedRecords)
+            .sort(([a], [b]) => new Date(b).getTime() - new Date(a).getTime())
+            .forEach(([date, dayRecords]) => {
+                const dayTotal = dayRecords.reduce((sum, r) => sum + (r.isIncome ? r.amount : -r.amount), 0);
+                const sign = dayTotal >= 0 ? '+' : '';
+                
+                md += `### ${date} (${sign}¥${dayTotal.toFixed(2)})\n\n`;
+                md += `| 分类 | 描述 | 金额 |\n`;
+                md += `|------|------|------|\n`;
+                
+                dayRecords.forEach(record => {
+                    const amount = record.isIncome ? `+¥${record.amount.toFixed(2)}` : `-¥${record.amount.toFixed(2)}`;
+                    const desc = record.description || '-';
+                    md += `| ${record.category} | ${desc} | ${amount} |\n`;
+                });
+                
+                md += '\n';
+            });
+        
+        return md;
+    }
 }
 
 // 主插件类
@@ -2448,6 +2592,13 @@ export default class AccountingPlugin extends Plugin {
             name: '导出账单 PDF',
             icon: 'file-down',
             callback: () => this.exportPDF()
+        });
+
+        this.addCommand({
+            id: 'export-markdown',
+            name: '导出账单 Markdown',
+            icon: 'file-text',
+            callback: () => this.exportMarkdown()
         });
     }
 
@@ -2546,6 +2697,25 @@ export default class AccountingPlugin extends Plugin {
                 if (leaves.length > 0 && leaves[0].view instanceof AccountingView) {
                     const view = leaves[0].view as AccountingView;
                     view.showExportPDFModal();
+                }
+            }, 500);
+        }
+    }
+
+    async exportMarkdown() {
+        // 先确保视图已打开
+        const leaves = this.app.workspace.getLeavesOfType(ACCOUNTING_VIEW);
+        if (leaves.length > 0 && leaves[0].view instanceof AccountingView) {
+            const view = leaves[0].view as AccountingView;
+            await view.exportToMarkdown();
+        } else {
+            // 如果视图未打开，先打开视图再导出
+            await this.activateView();
+            setTimeout(async () => {
+                const leaves = this.app.workspace.getLeavesOfType(ACCOUNTING_VIEW);
+                if (leaves.length > 0 && leaves[0].view instanceof AccountingView) {
+                    const view = leaves[0].view as AccountingView;
+                    await view.exportToMarkdown();
                 }
             }, 500);
         }

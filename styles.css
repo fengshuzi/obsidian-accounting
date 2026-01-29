@@ -1431,6 +1431,64 @@
     background: var(--background-modifier-hover);
 }
 
+/* Markdown 导出模态框样式 */
+.markdown-export-modal {
+    padding: 24px;
+    min-width: 600px;
+    max-width: 700px;
+    background: var(--background-primary);
+    border-radius: 12px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.export-hint {
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+    border: 1px solid #86efac;
+    border-radius: 8px;
+    color: #065f46;
+    font-weight: 500;
+    margin-bottom: 20px;
+}
+
+.markdown-preview-section {
+    margin-bottom: 24px;
+}
+
+.markdown-preview-textarea {
+    width: 100%;
+    min-height: 400px;
+    padding: 16px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    resize: vertical;
+}
+
+.markdown-preview-textarea:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+}
+
+@media (max-width: 600px) {
+    .markdown-export-modal {
+        width: 95vw;
+        max-width: 95vw;
+        min-width: 95vw;
+        padding: 16px;
+    }
+    
+    .markdown-preview-textarea {
+        min-height: 300px;
+        font-size: 12px;
+    }
+}
+
 /* 导出 PDF 模态框样式 */
 .export-pdf-modal {
     padding: 24px;
