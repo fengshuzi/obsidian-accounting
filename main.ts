@@ -256,6 +256,18 @@ class AccountingStorage {
         this.cache.lastUpdate = null;
     }
 
+    /**
+     * 日记文件变化时调用（vault / metadataCache 事件），清除缓存
+     * @returns 是否为日记文件且已清除缓存（用于决定是否刷新视图）
+     */
+    onFileChange(file: TFile): boolean {
+        if (file.path.startsWith(this.config.journalsPath + '/') && file.extension === 'md') {
+            this.clearCache();
+            return true;
+        }
+        return false;
+    }
+
     // 获取所有记账记录 - 每次都实时加载
     async getAllRecords(forceRefresh = false): Promise<AccountingRecord[]> {
         console.log('🔄 开始加载记账记录...');
@@ -2637,6 +2649,36 @@ export default class AccountingPlugin extends Plugin {
         
         // 初始化存储管理器
         this.storage = new AccountingStorage(this.app, this.config);
+
+        // 监听日记文件变化（Alfred/外部写入等），清除缓存并刷新视图，无需定时轮询
+        this.registerEvent(
+            this.app.vault.on('modify', (file) => {
+                if (file instanceof TFile && this.storage.onFileChange(file)) {
+                    this.refreshData();
+                }
+            })
+        );
+        this.registerEvent(
+            this.app.vault.on('create', (file) => {
+                if (file instanceof TFile && this.storage.onFileChange(file)) {
+                    this.refreshData();
+                }
+            })
+        );
+        this.registerEvent(
+            this.app.vault.on('delete', (file) => {
+                if (file instanceof TFile && this.storage.onFileChange(file)) {
+                    this.refreshData();
+                }
+            })
+        );
+        this.registerEvent(
+            this.app.metadataCache.on('changed', (file) => {
+                if (file instanceof TFile && this.storage.onFileChange(file)) {
+                    this.refreshData();
+                }
+            })
+        );
 
         // 注册视图
         this.registerView(ACCOUNTING_VIEW, (leaf) => new AccountingView(leaf, this));
