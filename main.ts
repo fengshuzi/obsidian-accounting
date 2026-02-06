@@ -1,4 +1,4 @@
-import { Plugin, ItemView, Modal, Notice, Menu, TFile } from 'obsidian';
+import { Plugin, ItemView, Modal, Notice, Menu, TFile, PluginSettingTab, Setting } from 'obsidian';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -874,6 +874,7 @@ class CategoryConfigModal extends Modal {
                 option.selected = true;
             }
         });
+
 
         // 预览效果
         const previewSection = this.contentArea.createDiv('config-section');
@@ -2722,6 +2723,9 @@ export default class AccountingPlugin extends Plugin {
             icon: 'file-text',
             callback: () => this.exportMarkdown()
         });
+
+        // 添加设置页面
+        this.addSettingTab(new AccountingSettingTab(this.app, this));
     }
 
     async onunload() {
@@ -2737,6 +2741,10 @@ export default class AccountingPlugin extends Plugin {
             if (await adapter.exists(configPath)) {
                 const configContent = await adapter.read(configPath);
                 this.config = JSON.parse(configContent);
+                // 确保 journalsPath 存在，如果不存在则使用默认值
+                if (!this.config.journalsPath || typeof this.config.journalsPath !== 'string') {
+                    this.config.journalsPath = 'journals';
+                }
                 console.log('配置加载成功:', this.config);
             } else {
                 console.log('配置文件不存在，使用默认配置');
@@ -2745,6 +2753,23 @@ export default class AccountingPlugin extends Plugin {
         } catch (error) {
             console.error('加载配置失败:', error);
             this.config = this.getDefaultConfig();
+        }
+    }
+
+    async saveConfig() {
+        try {
+            const configPath = `${this.manifest.dir}/config.json`;
+            const adapter = this.app.vault.adapter;
+            const configContent = JSON.stringify(this.config, null, 4);
+            await adapter.write(configPath, configContent);
+            // 清除缓存，重新加载数据
+            if (this.storage) {
+                this.storage.clearCache();
+            }
+            console.log('配置保存成功');
+        } catch (error) {
+            console.error('保存配置失败:', error);
+            new Notice('保存配置失败');
         }
     }
 
@@ -2841,5 +2866,44 @@ export default class AccountingPlugin extends Plugin {
                 }
             }, 500);
         }
+    }
+}
+
+// 设置页面
+class AccountingSettingTab extends PluginSettingTab {
+    plugin: AccountingPlugin;
+
+    constructor(app: any, plugin: AccountingPlugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
+
+    display(): void {
+        const { containerEl } = this;
+        containerEl.empty();
+
+        containerEl.createEl('h2', { text: '记账管理插件设置' });
+
+        new Setting(containerEl)
+            .setName('日记文件夹路径')
+            .setDesc('日记文件存放的文件夹路径（相对 vault 根目录），默认为 journals')
+            .addText(text => text
+                .setPlaceholder('journals')
+                .setValue(this.plugin.config.journalsPath || 'journals')
+                .onChange(async (value) => {
+                    const normalizedPath = (value || 'journals').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+                    this.plugin.config.journalsPath = normalizedPath || 'journals';
+                    await this.plugin.saveConfig();
+                    // 清除缓存并刷新视图
+                    if (this.plugin.storage) {
+                        this.plugin.storage.clearCache();
+                        await this.plugin.refreshData();
+                    }
+                }));
+
+        containerEl.createEl('p', {
+            text: '💡 提示：修改后会自动保存并刷新数据。日记文件应存放在此文件夹下，格式为 YYYY-MM-DD.md',
+            cls: 'setting-item-description'
+        });
     }
 }
