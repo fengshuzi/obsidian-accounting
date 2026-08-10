@@ -632,6 +632,41 @@ function escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * 用新的分类、描述和金额重建记账行。
+ * 保留原行的列表符号、emoji 与关键词之间的写法，以及"金额在前"还是"备注在前"的原始顺序。
+ * 例：'- #cy 午饭 25' + ('cy', '晚饭', 30) => '- #cy 晚饭 30'
+ * 例：'- #cy 25 午餐' + ('gw', '午餐', 30) => '- #gw 30 午餐'
+ */
+function buildEditedRecordLine(
+    record: AccountingRecord,
+    toKeyword: string,
+    description: string,
+    amount: number,
+    expenseEmoji: string
+): string {
+    // 解析器允许 emoji 与关键词之间有空格且大小写不敏感，这里按同样规则定位标记段
+    const markerRegex = new RegExp(
+        `(${escapeRegex(expenseEmoji)})(\\s*)(${escapeRegex(record.keyword)})`, 'i'
+    );
+    const match = markerRegex.exec(record.rawLine);
+    const prefix = match ? record.rawLine.slice(0, match.index) : '- ';
+    const marker = match ? `${match[1]}${match[2]}${toKeyword}` : expenseEmoji + toKeyword;
+    const rest = match ? record.rawLine.slice(match.index + match[0].length).trim() : '';
+
+    const desc = description.trim();
+    if (!desc) return `${prefix}${marker} ${amount}`;
+
+    // 原行把金额写在备注前面时保持同样顺序，避免编辑后行内容被重排。
+    // 只有开头这个数字确实是被解析成金额的那个数字时才算"金额在前"，
+    // 否则形如 "#cy 2026-08-01 补录午饭 25" 的备注会被误判。
+    const leading = /^[\d.]+/.exec(rest);
+    const amountFirst = leading !== null && parseFloat(leading[0]) === record.amount;
+    return amountFirst
+        ? `${prefix}${marker} ${amount} ${desc}`
+        : `${prefix}${marker} ${desc} ${amount}`;
+}
+
 class ReclassifyEngine {
     /**
      * 校验规则列表，返回所有错误（空数组表示通过）
@@ -1900,6 +1935,56 @@ class ConfirmOverwriteModal extends Modal {
     }
 }
 
+/** 删除单条记账记录的确认框（长按记录或右键菜单触发） */
+class ConfirmDeleteRecordModal extends Modal {
+    record: AccountingRecord;
+    filePath: string;
+    onConfirm: () => Promise<void>;
+
+    constructor(app: App, record: AccountingRecord, filePath: string, onConfirm: () => Promise<void>) {
+        super(app);
+        this.record = record;
+        this.filePath = filePath;
+        this.onConfirm = onConfirm;
+    }
+
+    onOpen(): void {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('delete-record-modal');
+        this.titleEl.setText('删除记账记录');
+
+        // 记录预览，避免误删
+        const preview = contentEl.createDiv('delete-record-preview');
+        preview.createSpan({ text: this.record.category, cls: 'delete-record-category' });
+        preview.createSpan({
+            text: this.record.description || '（无描述）',
+            cls: 'delete-record-desc'
+        });
+        preview.createSpan({
+            text: this.record.isIncome ? `+¥${this.record.amount}` : `-¥${this.record.amount}`,
+            cls: `delete-record-amount ${this.record.isIncome ? 'income' : 'expense'}`
+        });
+
+        contentEl.createEl('p', {
+            text: `将从 ${this.filePath} 中删除这一行，删除后可用 Obsidian 的撤销或文件历史恢复。`,
+            cls: 'record-modal-hint'
+        });
+
+        const buttons = contentEl.createDiv({ cls: 'modal-button-container' });
+        const confirmBtn = buttons.createEl('button', { text: '删除', cls: 'mod-warning' });
+        confirmBtn.onclick = () => {
+            void this.onConfirm();
+            this.close();
+        };
+        buttons.createEl('button', { text: '取消' }).onclick = () => this.close();
+    }
+
+    onClose(): void {
+        this.contentEl.empty();
+    }
+}
+
 // Markdown 导出模态框
 class MarkdownExportModal extends Modal {
     markdown: string;
@@ -2553,7 +2638,13 @@ class ExportPDFModal extends Modal {
 
 }
 
-// 快速记账模态框
+/** 复用快速记账弹窗编辑已有记录时的上下文，为空表示新增记账 */
+interface QuickEntryEditTarget {
+    record: AccountingRecord;
+    onUpdate: (keyword: string, description: string, amount: number) => Promise<void>;
+}
+
+// 快速记账模态框（editTarget 非空时复用同一表单编辑已有记录）
 class QuickEntryModal extends Modal {
     plugin: AccountingPlugin;
     onSave: () => Promise<void>;
@@ -2561,14 +2652,21 @@ class QuickEntryModal extends Modal {
     amount: string;
     description: string;
     amountInput: HTMLInputElement;
+    editTarget: QuickEntryEditTarget | null;
 
-    constructor(app: App, plugin: AccountingPlugin, onSave: () => Promise<void>) {
+    constructor(
+        app: App,
+        plugin: AccountingPlugin,
+        onSave: () => Promise<void>,
+        editTarget: QuickEntryEditTarget | null = null
+    ) {
         super(app);
         this.plugin = plugin;
         this.onSave = onSave;
         this.selectedCategory = null;
         this.amount = '';
         this.description = '';
+        this.editTarget = editTarget;
     }
 
     onOpen() {
@@ -2577,7 +2675,7 @@ class QuickEntryModal extends Modal {
         contentEl.addClass('quick-entry-modal');
         this.containerEl.addClass('quick-entry-container');
 
-        this.titleEl.setText('快速记账');
+        this.titleEl.setText(this.editTarget ? '编辑记账记录' : '快速记账');
 
         // 分类选择
         const categorySection = contentEl.createDiv('entry-section');
@@ -2585,8 +2683,10 @@ class QuickEntryModal extends Modal {
         
         const categoryGrid = categorySection.createDiv('category-grid');
         
-        // 获取默认分类
-        const defaultCategory = this.plugin.config.defaultCategory || 'cy';
+        // 编辑时预选记录原分类，新增时用默认分类
+        const defaultCategory = this.editTarget
+            ? this.editTarget.record.keyword
+            : (this.plugin.config.defaultCategory || 'cy');
         
         // 创建分类按钮
         recordEntries(this.plugin.config.categories).forEach(([keyword, categoryName]) => {
@@ -2629,6 +2729,12 @@ class QuickEntryModal extends Modal {
                 inputmode: 'text' // 优化移动端输入法
             }
         });
+
+        // 编辑模式回填原有金额和备注
+        if (this.editTarget) {
+            const { amount, description } = this.editTarget.record;
+            this.amountInput.value = description ? `${amount} ${description}` : `${amount}`;
+        }
 
         // 按钮组（放在输入框后面，但在移动端会通过CSS调整顺序）
         const buttons = contentEl.createDiv('entry-buttons');
@@ -2695,6 +2801,19 @@ class QuickEntryModal extends Modal {
 
         if (!amount || amount <= 0) {
             new Notice('请输入有效金额');
+            return;
+        }
+
+        // 编辑模式：交给调用方就地改写原始记账行，不追加新记录
+        if (this.editTarget) {
+            const { record } = this.editTarget;
+            const keyword = this.selectedCategory;
+            this.close();
+            // 没有任何改动时不写文件
+            if (keyword === record.keyword && description === record.description && amount === record.amount) {
+                return;
+            }
+            await this.editTarget.onUpdate(keyword, description, amount);
             return;
         }
 
@@ -3535,6 +3654,9 @@ class AccountingView extends ItemView {
     timeFilterEl: FilterDropdown;              // 时间筛选下拉
     categoryFilterEl: FilterDropdown;          // 分类筛选下拉
     activeCategoryDropdown: HTMLElement | null; // 当前打开的分类下拉菜单
+    longPressTimer: number | null = null;       // 长按计时器
+    longPressEl: HTMLElement | null = null;     // 当前处于长按状态的记录行
+    recordMenuShown = false;                    // 本次按压是否已弹出记录菜单（长按与系统菜单去重）
 
     constructor(leaf: WorkspaceLeaf, plugin: AccountingPlugin) {
         super(leaf);
@@ -3566,6 +3688,7 @@ class AccountingView extends ItemView {
 
 	    onClose(): Promise<void> {
 	        // 清理资源
+	        this.cancelLongPress();
 	        return Promise.resolve();
 	    }
 
@@ -3956,6 +4079,8 @@ class AccountingView extends ItemView {
 
         if (!this.recordsContainer) return;
 
+        // 列表即将重建，取消可能仍在计时的长按
+        this.cancelLongPress();
         this.recordsContainer.empty();
         
         if (!records || records.length === 0) {
@@ -4053,12 +4178,178 @@ class AccountingView extends ItemView {
                 cls: `amount ${record.isIncome ? 'income' : 'expense'}`
             });
             
-            // 右键菜单
+            // 右键菜单（移动端系统长按也会触发这里）
             recordItem.oncontextmenu = (e) => {
                 e.preventDefault();
-                this.showRecordContextMenu(e, record);
+                this.cancelLongPress();
+                // 本次按压已经由长按逻辑弹过菜单，系统再补一次 contextmenu 时忽略
+                if (this.recordMenuShown) return;
+                this.showRecordContextMenu({ x: e.clientX, y: e.clientY }, record);
             };
+
+            // 长按手势
+            this.attachLongPressHandler(recordItem, record);
         });
+    }
+
+    /**
+     * 绑定长按手势：长按记录弹出记录菜单（查看原文 / 编辑记录 / 删除记录）。
+     * 移动端系统长按触发的 contextmenu 弹的是同一个菜单，靠 recordMenuShown 去重。
+     * 只在主键/单指按下时启动计时，移动、抬起、离开都会取消；
+     * 按在分类标签上时不触发，保证原有的分类切换点击不受影响。
+     */
+    attachLongPressHandler(recordItem: HTMLElement, record: AccountingRecord): void {
+        const LONG_PRESS_MS = 600;
+        const MOVE_TOLERANCE = 10;
+        let startX = 0;
+        let startY = 0;
+
+        recordItem.addEventListener('pointerdown', (e: PointerEvent) => {
+            // 新的一次按压，重置菜单去重标记
+            this.recordMenuShown = false;
+
+            // 右键/中键交给原有的上下文菜单
+            if (e.button !== 0) return;
+
+            // 分类标签有自己的点击交互，不参与长按
+            const target = e.target as HTMLElement | null;
+            if (target?.closest('.record-category-label')) return;
+
+            this.cancelLongPress();
+            startX = e.clientX;
+            startY = e.clientY;
+            this.longPressEl = recordItem;
+            recordItem.addClass('long-press-active');
+            this.longPressTimer = window.setTimeout(() => {
+                this.longPressTimer = null;
+                this.cancelLongPress();
+                // 统一走记录菜单：移动端系统长按弹的也是这个菜单，去重后只出现一个
+                this.showRecordContextMenu({ x: startX, y: startY }, record);
+            }, LONG_PRESS_MS);
+        });
+
+        recordItem.addEventListener('pointermove', (e: PointerEvent) => {
+            if (this.longPressTimer === null) return;
+            // 滑动/滚动视为取消
+            if (Math.abs(e.clientX - startX) > MOVE_TOLERANCE || Math.abs(e.clientY - startY) > MOVE_TOLERANCE) {
+                this.cancelLongPress();
+            }
+        });
+
+        recordItem.addEventListener('pointerup', () => this.cancelLongPress());
+        recordItem.addEventListener('pointercancel', () => this.cancelLongPress());
+        recordItem.addEventListener('pointerleave', () => this.cancelLongPress());
+    }
+
+    /** 取消长按计时并清除按压样式 */
+    cancelLongPress(): void {
+        if (this.longPressTimer !== null) {
+            window.clearTimeout(this.longPressTimer);
+            this.longPressTimer = null;
+        }
+        if (this.longPressEl) {
+            this.longPressEl.removeClass('long-press-active');
+            this.longPressEl = null;
+        }
+    }
+
+    /** 记录对应的日记文件路径（补录记录取原始文件日期） */
+    getRecordFilePath(record: AccountingRecord): string {
+        const fileDate = isoToFileDate(record.fileDate, this.plugin.config.dateFormat);
+        return `${this.plugin.config.journalsPath}/${fileDate}.md`;
+    }
+
+    /** 弹出编辑弹窗（复用快速记账弹窗，编辑模式） */
+    showEditRecordModal(record: AccountingRecord): void {
+        new QuickEntryModal(
+            this.app,
+            this.plugin,
+            () => this.loadAllRecords(false, true),
+            {
+                record,
+                onUpdate: async (keyword, description, amount) => {
+                    await this.updateRecord(record, keyword, description, amount);
+                }
+            }
+        ).open();
+    }
+
+    /** 就地改写记账行的分类、描述与金额（只改这一行，保留缩进与列表符号） */
+    async updateRecord(
+        record: AccountingRecord,
+        keyword: string,
+        description: string,
+        amount: number
+    ): Promise<void> {
+        const filePath = this.getRecordFilePath(record);
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (!(file instanceof TFile)) {
+            new Notice(`未找到日记文件: ${filePath}`);
+            return;
+        }
+
+        try {
+            const content = await this.app.vault.read(file);
+            const lines = content.split('\n');
+            const index = lines.findIndex(line => line.trim() === record.rawLine);
+            if (index === -1) {
+                new Notice('原始记录已变更，未执行修改');
+                await this.loadAllRecords(false, true);
+                return;
+            }
+
+            const original = lines[index];
+            const indent = original.slice(0, original.length - original.trimStart().length);
+            lines[index] = indent + buildEditedRecordLine(
+                record, keyword, description, amount, this.plugin.config.expenseEmoji
+            );
+            await this.app.vault.modify(file, lines.join('\n'));
+            new Notice('已更新该条记账记录');
+            await this.loadAllRecords(false, true);
+        } catch (error) {
+            console.error('更新记账记录失败:', error);
+            new Notice('修改失败');
+        }
+    }
+
+    /** 弹出删除确认 */
+    showDeleteRecordConfirm(record: AccountingRecord): void {
+        new ConfirmDeleteRecordModal(
+            this.app,
+            record,
+            this.getRecordFilePath(record),
+            async () => { await this.deleteRecord(record); }
+        ).open();
+    }
+
+    /** 从日记文件中删除该条记账行（只删这一行，不动文件其他内容） */
+    async deleteRecord(record: AccountingRecord): Promise<void> {
+        const filePath = this.getRecordFilePath(record);
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (!(file instanceof TFile)) {
+            new Notice(`未找到日记文件: ${filePath}`);
+            return;
+        }
+
+        try {
+            const content = await this.app.vault.read(file);
+            const lines = content.split('\n');
+            // rawLine 已 trim，按 trim 后内容匹配，兼容带缩进的行
+            const index = lines.findIndex(line => line.trim() === record.rawLine);
+            if (index === -1) {
+                new Notice('原始记录已变更，未执行删除');
+                await this.loadAllRecords(false, true);
+                return;
+            }
+
+            lines.splice(index, 1);
+            await this.app.vault.modify(file, lines.join('\n'));
+            new Notice('已删除该条记账记录');
+            await this.loadAllRecords(false, true);
+        } catch (error) {
+            console.error('删除记账记录失败:', error);
+            new Notice('删除失败');
+        }
     }
 
     /** 在指定元素下方显示分类下拉选择 */
@@ -4140,8 +4431,11 @@ class AccountingView extends ItemView {
         }
     }
 
-    showRecordContextMenu(event: MouseEvent, record: AccountingRecord) {
+    showRecordContextMenu(position: { x: number; y: number }, record: AccountingRecord) {
+        this.recordMenuShown = true;
+
         const menu = new Menu();
+        menu.onHide(() => { this.recordMenuShown = false; });
         
         menu.addItem(item => {
             item.setTitle('查看原文')
@@ -4151,7 +4445,24 @@ class AccountingView extends ItemView {
                 });
         });
 
-        menu.showAtMouseEvent(event);
+        menu.addItem(item => {
+            item.setTitle('编辑记录')
+                .setIcon('pencil')
+                .onClick(() => {
+                    this.showEditRecordModal(record);
+                });
+        });
+
+        menu.addItem(item => {
+            item.setTitle('删除记录')
+                .setIcon('trash-2')
+                .setWarning(true)
+                .onClick(() => {
+                    this.showDeleteRecordConfirm(record);
+                });
+        });
+
+        menu.showAtPosition(position);
     }
 
     async openJournalFile(date: string) {

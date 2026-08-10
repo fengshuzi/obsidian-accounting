@@ -638,6 +638,20 @@
     background: var(--background-modifier-hover);
 }
 
+/* 长按删除：按压反馈 */
+.record-item.long-press-active {
+    background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+    transform: scale(0.99);
+}
+
+/* 长按期间避免触发文本选中/系统放大镜 */
+.record-item.long-press-active,
+.record-item.long-press-active * {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
 .record-item:last-child {
     border-bottom: none;
 }
@@ -2191,6 +2205,62 @@ button.accounting-btn-primary:hover {
 .quick-copy-count {
     font-size: 13px;
     color: var(--text-muted);
+}
+
+/* 删除记录确认框样式 */
+.delete-record-modal .delete-record-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 4px 0 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+}
+
+.delete-record-modal .delete-record-category {
+    flex-shrink: 0;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: var(--background-modifier-border);
+}
+
+.delete-record-modal .delete-record-desc {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--text-normal);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.delete-record-modal .delete-record-amount {
+    flex-shrink: 0;
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.delete-record-modal .delete-record-amount.income {
+    color: #059669;
+}
+
+.delete-record-modal .delete-record-amount.expense {
+    color: #dc2626;
+}
+
+/* 删除/编辑弹窗共用的说明文字 */
+.record-modal-hint {
+    margin: 0 0 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    word-break: break-all;
 }
 
 /* 编辑复制模态框样式 */
