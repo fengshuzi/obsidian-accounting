@@ -1,7 +1,7 @@
 {
 	"id": "coin-memo",
 	"name": "Coin Memo",
-	"version": "1.0.23",
+	"version": "1.0.24",
 	"minAppVersion": "1.7.2",
 	"description": "基于日记文件的每日记账插件，支持自动识别和统计记账记录.",
 	"author": "lizhifeng",

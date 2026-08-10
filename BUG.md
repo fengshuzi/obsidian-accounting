@@ -70,3 +70,45 @@
 - `a6fcd6a`：尝试改用 jsPDF 原生绘制。
 - `21886ce`：因中文字体依赖问题回滚到 html2canvas。
 - `1.0.23`：采用语义分页和逐页栅格化完成最终修复。
+## 2026-08-10：统计视图时间下拉被统计卡片遮挡（1.0.24）
+
+### 问题与影响
+
+在「记账统计」视图展开「时间」筛选下拉后，菜单只露出第一项，其余选项被下方的统计卡片（总收入/总支出/结余/预算状态）盖住。当预算超支、`budget-alerts` 出现在统计卡片之前时，告警条同样会盖住菜单。
+
+用户实际上无法看到并选中大部分时间范围选项，核心筛选交互不可用。主视图头部的时间/分类/更多下拉存在同样的结构风险。
+
+### 根因
+
+层叠上下文（stacking context）问题，与元素尺寸和 `overflow` 无关。
+
+- `.filter-dropdown-menu` 是 `position: absolute` + `z-index: 100`，但它的定位祖先 `.filter-dropdown` 位于 `.accounting-filters` 内部。
+- 暗色主题样式给 `.accounting-filters` 加了 `backdrop-filter: blur(...)`，该属性会创建新的层叠上下文，于是菜单的 `z-index: 100` 只在 `.accounting-filters` 内部生效，无法与外部兄弟节点比较层级。
+- `.stat-card` 和 `.budget-alert` 在暗色主题下同样带 `backdrop-filter`，各自创建层叠上下文。
+- `.accounting-filters` 与 `.accounting-stats` 都是 `z-index: auto`，同级时按 DOM 顺序绘制；统计区在后，因此整体覆盖筛选区子树，包括已展开的下拉菜单。
+- 浅色主题没有 `backdrop-filter`，菜单能正常浮在上层，所以该缺陷只在暗色主题下暴露。
+
+### 最终修复
+
+在 `styles.css` 中显式声明三层层级，不再依赖 `z-index: auto` 的 DOM 顺序：
+
+- `.accounting-header`：`position: relative; z-index: 30;`（主视图头部下拉）
+- `.accounting-filters`：`position: relative; z-index: 20;`（统计视图筛选区）
+- `.accounting-stats`、`.main-page-stats`、`.accounting-records`：`position: relative; z-index: 0;`
+
+统计区被显式压到 `z-index: 0` 后自身成为层叠上下文，`.stat-card:hover` 的 `transform` 也无法再冒到筛选区之上。
+
+### 方案取舍
+
+- 保留统计卡片和预算告警的 `backdrop-filter` 毛玻璃效果，只调整层级，不为了修复遮挡而牺牲既有视觉设计。
+- 未改用 `document.body` 挂载浮层或 Obsidian `Menu` 重写下拉，纯 CSS 即可解决，避免引入定位计算和滚动跟随的额外复杂度。
+- 下拉菜单背景使用不透明的 `var(--background-primary)`，展开后能完整遮住下方内容，无需额外遮罩。
+
+### 验证与回归要求
+
+- `npm run lint` 与 `npm run build` 必须通过，且 `dist/styles.css` 包含新增层级规则。
+- 暗色主题下打开统计视图，展开时间下拉，五个选项必须全部可见可点击。
+- 在预算超支、页面出现预算告警条时重复上述验证。
+- 主视图头部的时间、分类、更多三个下拉在暗色主题下都不能被下方统计卡片或记录列表遮挡。
+- 浅色主题需回归确认层级调整未引入新的遮挡或阴影异常。
+- 后续如果给筛选区、头部或统计区新增 `backdrop-filter`、`filter`、`transform`、`opacity` 等会创建层叠上下文的属性，必须重新验证浮层层级。

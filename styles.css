@@ -18,6 +18,9 @@
     margin-bottom: 20px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--background-modifier-border);
+    /* 头部里的下拉浮层要盖住下方统计卡片/预算告警 */
+    position: relative;
+    z-index: 30;
 }
 
 .accounting-title {
@@ -80,6 +83,21 @@
     border: 1px solid var(--background-modifier-border);
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    /* 筛选区里的下拉浮层要盖住下方统计卡片/预算告警 */
+    position: relative;
+    z-index: 20;
+}
+
+/*
+ * 统计区（预算告警 + 统计卡片）在暗色主题下带 backdrop-filter，
+ * 会创建新的层叠上下文并按 DOM 顺序覆盖前面的下拉浮层。
+ * 这里显式压低统计区层级，保证筛选下拉始终在最上层。
+ */
+.accounting-stats,
+.main-page-stats,
+.accounting-records {
+    position: relative;
+    z-index: 0;
 }
 
 .filter-section {
