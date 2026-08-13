@@ -3230,3 +3230,250 @@ button.accounting-btn-primary:hover {
     border-radius: 12px;
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
 }
+
+/* ── 统计视图扩展：环比 / 趋势 / 排行 / 洞察 ─────────────────────────────── */
+
+.stats-compare,
+.stats-trend,
+.stats-ranking,
+.stats-insights {
+    margin-bottom: 24px;
+}
+
+.stats-compare h3,
+.stats-trend h3,
+.stats-ranking h3,
+.stats-insights h3 {
+    margin: 0 0 12px 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+/* 环比对比卡片 */
+.stats-compare-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.compare-card {
+    padding: 14px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    min-width: 0;
+}
+
+.compare-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.compare-current {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-normal);
+    margin-bottom: 4px;
+}
+
+.compare-delta {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.compare-delta.good {
+    color: #16a34a;
+}
+
+.compare-delta.bad {
+    color: #dc2626;
+}
+
+.compare-delta.neutral {
+    color: var(--text-faint);
+}
+
+/* 收支趋势图 */
+.trend-legend {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.trend-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.trend-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    display: inline-block;
+}
+
+.trend-legend-swatch.income {
+    background: #22c55e;
+}
+
+.trend-legend-swatch.expense {
+    background: #f59e0b;
+}
+
+.trend-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 160px;
+    padding: 8px 4px 0 4px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    overflow-x: auto;
+}
+
+.trend-item {
+    flex: 1 0 auto;
+    min-width: 18px;
+    max-width: 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+}
+
+.trend-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    flex: 1;
+    width: 100%;
+    justify-content: center;
+}
+
+.trend-bar {
+    width: 45%;
+    max-width: 16px;
+    height: var(--bar-height, 0%);
+    min-height: 1px;
+    border-radius: 2px 2px 0 0;
+}
+
+.trend-bar.income {
+    background: #22c55e;
+}
+
+.trend-bar.expense {
+    background: #f59e0b;
+}
+
+.trend-label {
+    font-size: 10px;
+    color: var(--text-faint);
+    margin-top: 4px;
+    white-space: nowrap;
+}
+
+.trend-label.rotated {
+    transform: rotate(-45deg);
+    transform-origin: top right;
+    margin-top: 8px;
+    margin-bottom: 14px;
+}
+
+/* 支出排行 */
+.stats-ranking-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+}
+
+.ranking-block {
+    padding: 14px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    min-width: 0;
+}
+
+.ranking-block h4 {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.ranking-row {
+    display: grid;
+    grid-template-columns: 72px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.ranking-row.simple {
+    grid-template-columns: 1fr auto;
+}
+
+.ranking-label {
+    font-size: 12px;
+    color: var(--cat-color, var(--text-normal));
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ranking-track {
+    height: 8px;
+    background: var(--background-secondary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.ranking-fill {
+    height: 100%;
+    width: var(--bar-width, 0%);
+    background: var(--cat-color, var(--interactive-accent));
+    border-radius: 4px;
+}
+
+.ranking-name {
+    font-size: 12px;
+    color: var(--text-normal);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ranking-value {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* 明细洞察 */
+.insights-list {
+    padding: 12px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+}
+
+.insight-item {
+    font-size: 13px;
+    color: var(--text-normal);
+    padding: 3px 0;
+}
+
+@media (max-width: 768px) {
+    .stats-compare-list,
+    .stats-ranking-grid {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,6 +1,6 @@
 {
   "name": "coin-memo",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "description": "基于日记文件的记账管理插件",
   "main": "main.js",
   "scripts": {

@@ -3539,6 +3539,282 @@ function getCategoryColorShared(category: string): string {
     return CATEGORY_COLORS[category] ?? '#6c757d'; // 默认灰色
 }
 
+// ── 统计视图扩展：环比 / 趋势 / 排行 / 洞察 ─────────────────────────────────
+
+interface ComparisonEntry {
+    label: string;
+    current: number;
+    previous: number | null;
+    /** true 时上涨为正向（结余），false 时上涨为负向（支出） */
+    higherIsBetter: boolean;
+}
+
+/** 解析 YYYY-MM-DD 为本地 Date */
+function parseLocalDate(dateStr: string): Date {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+}
+
+/** 计算 [start, end] 之前等长的上一周期（前推到 start 前一天结束） */
+function previousDateRange(start: string, end: string): { start: string; end: string } {
+    const startDate = parseLocalDate(start);
+    const endDate = parseLocalDate(end);
+    const days = Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+    const prevEnd = new Date(startDate);
+    prevEnd.setDate(prevEnd.getDate() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevStart.getDate() - days + 1);
+    return { start: formatLocalDate(prevStart), end: formatLocalDate(prevEnd) };
+}
+
+/** 环比对比区块：支出 / 收入 / 结余 */
+function renderComparisonInto(
+    container: HTMLElement,
+    stats: AccountingStats,
+    prevRecords: AccountingRecord[],
+    calculate: (records: AccountingRecord[]) => AccountingStats
+): void {
+    const prevStats = prevRecords.length > 0 ? calculate(prevRecords) : null;
+
+    const section = container.createDiv('stats-compare');
+    section.createEl('h3', { text: '环比对比' });
+    const list = section.createDiv('stats-compare-list');
+
+    const balance = stats.totalIncome - stats.totalExpense;
+    const prevBalance = prevStats ? prevStats.totalIncome - prevStats.totalExpense : null;
+
+    const entries: ComparisonEntry[] = [
+        { label: '支出', current: stats.totalExpense, previous: prevStats?.totalExpense ?? null, higherIsBetter: false },
+        { label: '收入', current: stats.totalIncome, previous: prevStats?.totalIncome ?? null, higherIsBetter: true },
+        { label: '结余', current: balance, previous: prevBalance, higherIsBetter: true }
+    ];
+
+    entries.forEach(entry => {
+        const card = list.createDiv('compare-card');
+        card.createDiv({ text: entry.label, cls: 'compare-label' });
+        card.createDiv({ text: `¥${entry.current.toFixed(2)}`, cls: 'compare-current' });
+
+        const deltaEl = card.createDiv('compare-delta');
+        if (entry.previous === null || entry.previous <= 0) {
+            deltaEl.setText('—');
+            deltaEl.addClass('neutral');
+        } else {
+            const diff = entry.current - entry.previous;
+            const percent = (diff / entry.previous) * 100;
+            const sign = diff > 0 ? '+' : '';
+            deltaEl.setText(`${diff > 0 ? '↑' : diff < 0 ? '↓' : ''} ${sign}${percent.toFixed(1)}% (${sign}¥${diff.toFixed(2)})`);
+            const isGood = diff === 0 ? null : (diff > 0) === entry.higherIsBetter;
+            deltaEl.addClass(isGood === null ? 'neutral' : isGood ? 'good' : 'bad');
+        }
+    });
+}
+
+/** 收支趋势图：周期 ≤ 31 天按日聚合，否则按月聚合 */
+function renderTrendChartInto(container: HTMLElement, stats: AccountingStats, start: string, end: string): void {
+    const startDate = parseLocalDate(start);
+    const endDate = parseLocalDate(end);
+    const days = Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+    const byDay = days <= 31;
+
+    interface TrendBucket { label: string; income: number; expense: number; }
+    const buckets: TrendBucket[] = [];
+
+    if (byDay) {
+        const cursor = new Date(startDate);
+        while (cursor <= endDate) {
+            const key = formatLocalDate(cursor);
+            const dayStats = stats.dailyStats[key];
+            buckets.push({
+                label: `${cursor.getMonth() + 1}/${cursor.getDate()}`,
+                income: dayStats?.income ?? 0,
+                expense: dayStats?.expense ?? 0
+            });
+            cursor.setDate(cursor.getDate() + 1);
+        }
+    } else {
+        const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+        while (cursor <= endDate) {
+            const monthKey = `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`;
+            let income = 0;
+            let expense = 0;
+            recordEntries(stats.dailyStats).forEach(([date, dayStats]) => {
+                if (date.startsWith(monthKey)) {
+                    income += dayStats.income;
+                    expense += dayStats.expense;
+                }
+            });
+            buckets.push({ label: `${cursor.getFullYear()}/${cursor.getMonth() + 1}月`, income, expense });
+            cursor.setMonth(cursor.getMonth() + 1);
+        }
+    }
+
+    const hasData = buckets.some(b => b.income > 0 || b.expense > 0);
+    if (!hasData) return;
+
+    const section = container.createDiv('stats-trend');
+    section.createEl('h3', { text: byDay ? '收支趋势（按日）' : '收支趋势（按月）' });
+
+    const legend = section.createDiv('trend-legend');
+    const incomeLegend = legend.createSpan('trend-legend-item');
+    incomeLegend.createSpan('trend-legend-swatch income');
+    incomeLegend.appendText('收入');
+    const expenseLegend = legend.createSpan('trend-legend-item');
+    expenseLegend.createSpan('trend-legend-swatch expense');
+    expenseLegend.appendText('支出');
+
+    const maxValue = Math.max(...buckets.map(b => Math.max(b.income, b.expense)));
+    const chart = section.createDiv('trend-chart');
+
+    buckets.forEach(bucket => {
+        const item = chart.createDiv('trend-item');
+        item.title = `${bucket.label}  收入 ¥${bucket.income.toFixed(2)} / 支出 ¥${bucket.expense.toFixed(2)}`;
+
+        const bars = item.createDiv('trend-bars');
+        const incomeHeight = maxValue > 0 ? Math.round((bucket.income / maxValue) * 100) : 0;
+        const expenseHeight = maxValue > 0 ? Math.round((bucket.expense / maxValue) * 100) : 0;
+
+        const incomeBar = bars.createDiv('trend-bar income');
+        incomeBar.style.setProperty('--bar-height', `${incomeHeight}%`);
+        const expenseBar = bars.createDiv('trend-bar expense');
+        expenseBar.style.setProperty('--bar-height', `${expenseHeight}%`);
+
+        const label = item.createDiv({ text: bucket.label, cls: 'trend-label' });
+        if (buckets.length > 12) {
+            label.addClass('rotated');
+        }
+    });
+}
+
+/** 支出分类 / 关键词 / 单笔支出 Top 5 排行 */
+function renderRankingsInto(container: HTMLElement, stats: AccountingStats): void {
+    const expenseCategories = categoryStatEntries(stats.categoryStats)
+        .map(([category, data]): [string, number, number] => {
+            const expenseRecords = data.records.filter(r => !r.isIncome);
+            const expenseTotal = expenseRecords.reduce((sum, r) => sum + r.amount, 0);
+            return [category, expenseTotal, expenseRecords.length];
+        })
+        .filter(([, total]) => total > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+
+    const keywordTotals: Record<string, { total: number; count: number }> = {};
+    recordEntries(stats.categoryStats).forEach(([, data]) => {
+        data.records.forEach(record => {
+            if (record.isIncome) return;
+            if (!keywordTotals[record.keyword]) {
+                keywordTotals[record.keyword] = { total: 0, count: 0 };
+            }
+            keywordTotals[record.keyword].total += record.amount;
+            keywordTotals[record.keyword].count += 1;
+        });
+    });
+    const topKeywords = recordEntries(keywordTotals)
+        .sort(([, a], [, b]) => b.total - a.total)
+        .slice(0, 5);
+
+    const topRecords = recordEntries(stats.categoryStats)
+        .flatMap(([, data]) => data.records)
+        .filter(r => !r.isIncome)
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 5);
+
+    if (expenseCategories.length === 0 && topKeywords.length === 0 && topRecords.length === 0) return;
+
+    const section = container.createDiv('stats-ranking');
+    section.createEl('h3', { text: '支出排行' });
+    const grid = section.createDiv('stats-ranking-grid');
+
+    if (expenseCategories.length > 0) {
+        const block = grid.createDiv('ranking-block');
+        block.createEl('h4', { text: '分类 Top 5' });
+        const maxTotal = expenseCategories[0][1];
+        expenseCategories.forEach(([category, total, count]) => {
+            const row = block.createDiv('ranking-row');
+            const label = row.createDiv('ranking-label');
+            label.style.setProperty('--cat-color', getCategoryColorShared(category));
+            label.setText(category);
+
+            const track = row.createDiv('ranking-track');
+            const fill = track.createDiv('ranking-fill');
+            fill.style.setProperty('--bar-width', `${Math.round((total / maxTotal) * 100)}%`);
+            fill.style.setProperty('--cat-color', getCategoryColorShared(category));
+
+            row.createDiv({ text: `¥${total.toFixed(2)} · ${count}笔`, cls: 'ranking-value' });
+        });
+    }
+
+    if (topKeywords.length > 0) {
+        const block = grid.createDiv('ranking-block');
+        block.createEl('h4', { text: '关键词 Top 5' });
+        topKeywords.forEach(([keyword, data]) => {
+            const row = block.createDiv('ranking-row simple');
+            row.createDiv({ text: keyword, cls: 'ranking-name' });
+            row.createDiv({ text: `¥${data.total.toFixed(2)} · ${data.count}笔`, cls: 'ranking-value' });
+        });
+    }
+
+    if (topRecords.length > 0) {
+        const block = grid.createDiv('ranking-block');
+        block.createEl('h4', { text: '单笔支出 Top 5' });
+        topRecords.forEach(record => {
+            const row = block.createDiv('ranking-row simple');
+            const name = record.description ? `${record.keyword} ${record.description}` : record.keyword;
+            row.createDiv({ text: `${record.date} ${name}`, cls: 'ranking-name' });
+            row.createDiv({ text: `¥${record.amount.toFixed(2)}`, cls: 'ranking-value' });
+        });
+    }
+}
+
+/** 明细洞察：日均支出 / 记账天数 / 最大单日支出 / 笔数占比 / 月化估算 */
+function renderInsightsInto(container: HTMLElement, stats: AccountingStats, start: string, end: string): void {
+    const startDate = parseLocalDate(start);
+    const endDate = parseLocalDate(end);
+    const rangeDays = Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+
+    const dailyEntries = recordEntries(stats.dailyStats);
+    if (dailyEntries.length === 0) return;
+
+    const recordedDays = dailyEntries.filter(([, d]) => d.records.length > 0).length;
+    const totalCount = dailyEntries.reduce((sum, [, d]) => sum + d.records.length, 0);
+    const incomeCount = dailyEntries.reduce((sum, [, d]) => sum + d.records.filter(r => r.isIncome).length, 0);
+    const expenseCount = totalCount - incomeCount;
+
+    const dailyAvgExpense = stats.totalExpense / rangeDays;
+    const dailyAvgCount = totalCount / rangeDays;
+
+    let maxExpenseDay: string | null = null;
+    let maxExpenseAmount = 0;
+    dailyEntries.forEach(([date, d]) => {
+        if (d.expense > maxExpenseAmount) {
+            maxExpenseAmount = d.expense;
+            maxExpenseDay = date;
+        }
+    });
+
+    const section = container.createDiv('stats-insights');
+    section.createEl('h3', { text: '明细洞察' });
+    const list = section.createDiv('insights-list');
+
+    const items: string[] = [
+        `日均支出 ¥${dailyAvgExpense.toFixed(2)}（按 ${rangeDays} 天计）`,
+        `记账 ${recordedDays} 天，共 ${totalCount} 笔，日均 ${dailyAvgCount.toFixed(1)} 笔`
+    ];
+    if (maxExpenseDay) {
+        items.push(`最大单日支出 ¥${maxExpenseAmount.toFixed(2)}（${maxExpenseDay}）`);
+    }
+    if (totalCount > 0) {
+        items.push(`支出 ${expenseCount} 笔 / 收入 ${incomeCount} 笔（支出占 ${((expenseCount / totalCount) * 100).toFixed(0)}%）`);
+    }
+    if (rangeDays >= 28) {
+        items.push(`按当前节奏，月化支出约 ¥${(dailyAvgExpense * 30).toFixed(2)}`);
+    }
+
+    items.forEach(text => {
+        const item = list.createDiv('insight-item');
+        item.setText(`· ${text}`);
+    });
+}
+
 /** 将总金额/预算卡片、预算告警、分类统计渲染到 container（主视图与统计视图共用） */
 function renderStatsInto(container: HTMLElement, stats: AccountingStats | null): void {
     container.empty();
@@ -5440,6 +5716,10 @@ class AccountingStatsView extends ItemView {
             { value: 'lastWeek', label: '上周' },
             { value: 'thisMonth', label: '本月' },
             { value: 'lastMonth', label: '上月' },
+            { value: 'last3Months', label: '近3月' },
+            { value: 'last6Months', label: '近6月' },
+            { value: 'thisYear', label: '今年' },
+            { value: 'lastYear', label: '去年' },
             { value: 'custom', label: '自定义' }
         ]);
         dropdown.setValue('thisMonth');
@@ -5480,6 +5760,26 @@ class AccountingStatsView extends ItemView {
                 startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
                 endDate = new Date(now.getFullYear(), now.getMonth(), 0);
                 displayText = '上月';
+                break;
+            case 'last3Months':
+                startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+                endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                displayText = '近3月';
+                break;
+            case 'last6Months':
+                startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+                endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                displayText = '近6月';
+                break;
+            case 'thisYear':
+                startDate = new Date(now.getFullYear(), 0, 1);
+                endDate = new Date(now.getFullYear(), 11, 31);
+                displayText = '今年';
+                break;
+            case 'lastYear':
+                startDate = new Date(now.getFullYear() - 1, 0, 1);
+                endDate = new Date(now.getFullYear() - 1, 11, 31);
+                displayText = '去年';
                 break;
             case 'custom':
                 this.showDateRangePicker();
@@ -5533,6 +5833,15 @@ class AccountingStatsView extends ItemView {
 
             const stats = this.plugin.storage.calculateStatistics(records);
             renderStatsInto(this.statsContainer, stats);
+            if (records.length > 0) {
+                const prevRange = previousDateRange(this.currentDateRange.start, this.currentDateRange.end);
+                const prevRecords = this.plugin.storage.filterRecordsByDateRange(allRecords, prevRange.start, prevRange.end);
+                const calculate = (rs: AccountingRecord[]) => this.plugin.storage.calculateStatistics(rs);
+                renderComparisonInto(this.statsContainer, stats, prevRecords, calculate);
+                renderTrendChartInto(this.statsContainer, stats, this.currentDateRange.start, this.currentDateRange.end);
+                renderRankingsInto(this.statsContainer, stats);
+                renderInsightsInto(this.statsContainer, stats, this.currentDateRange.start, this.currentDateRange.end);
+            }
         } catch (error) {
             console.error('加载统计数据失败:', error);
             new Notice('加载统计数据失败');
